@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import math
 import os
 import re
 import sys
 import wave
+from array import array
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -13,8 +17,9 @@ from pathlib import Path
 import sounddevice as sd
 from dotenv import dotenv_values, set_key
 from google import genai
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QFont, QFontDatabase
+from google.genai import types
+from PySide6.QtCore import QRectF, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QCloseEvent, QColor, QFont, QFontDatabase, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -31,7 +36,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .cli import read_vocabulary
+from .cli import BLOCKSIZE, MODEL as LIVE_MODEL, SAMPLE_RATE, decode_file_to_pcm, read_vocabulary
 
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
@@ -40,7 +45,14 @@ VOCABULARY_PATH = PROJECT_DIR / "config" / "vocabulary.txt"
 TRANSCRIPTS_DIR = PROJECT_DIR / "transcripts"
 RECORDINGS_DIR = PROJECT_DIR / "recordings"
 BATCH_MODEL = "gemini-3.5-transcribe"
-MAX_RECORDING_SECONDS = 1200
+LIVE_RECORDING_SECONDS = 510  # 8m30s leaves room within the Live model's 10-minute session.
+BATCH_RECORDING_SECONDS = 1200
+LIVE_FINALIZATION_SECONDS = 10
+
+
+def clock_text(seconds: int) -> str:
+    minutes, remaining = divmod(seconds, 60)
+    return f"{minutes:02d}:{remaining:02d}"
 
 
 def saved_api_key() -> str:
@@ -114,12 +126,20 @@ class LocalRecorder:
         self.samples = bytearray()
         self.stream: sd.RawInputStream | None = None
         self.warning = ""
+        self.level = 0
 
     def start(self) -> None:
         def callback(indata: object, _frames: int, _time: object, status: object) -> None:
             if status:
                 self.warning = str(status)
-            self.samples.extend(bytes(indata))
+            chunk = bytes(indata)
+            self.samples.extend(chunk)
+            samples = array("h")
+            samples.frombytes(chunk)
+            if samples:
+                rms = math.sqrt(sum(sample * sample for sample in samples) / len(samples))
+                dbfs = 20 * math.log10(max(rms / 32768, 1e-6))
+                self.level = max(0, min(100, round((dbfs + 55) * 100 / 47)))
 
         self.stream = sd.RawInputStream(
             samplerate=self.microphone.sample_rate,
@@ -152,7 +172,39 @@ class LocalRecorder:
             recording.setframerate(self.microphone.sample_rate)
             recording.writeframes(self.samples)
         self.samples.clear()
+        self.level = 0
         return self.path
+
+
+class AudioLevelMeter(QWidget):
+    """A local-only rolling microphone level display."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.levels = [0] * 66
+        self.setMinimumHeight(44)
+
+    def push_level(self, level: int) -> None:
+        self.levels = self.levels[1:] + [max(0, min(100, level))]
+        self.update()
+
+    def clear(self) -> None:
+        self.levels = [0] * len(self.levels)
+        self.update()
+
+    def paintEvent(self, _event: object) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        width = self.width()
+        height = self.height()
+        step = width / len(self.levels)
+        bar_width = max(2.0, min(5.0, step * 0.55))
+        for index, level in enumerate(self.levels):
+            bar_height = max(3.0, (height - 5) * level / 100)
+            painter.setBrush(QColor("#51d6c4") if level > 3 else QColor("#486078"))
+            painter.setPen(Qt.PenStyle.NoPen)
+            rect = QRectF(index * step + (step - bar_width) / 2, (height - bar_height) / 2, bar_width, bar_height)
+            painter.drawRoundedRect(rect, bar_width / 2, bar_width / 2)
 
 
 class BatchTranscribeWorker(QThread):
@@ -203,10 +255,85 @@ class BatchTranscribeWorker(QThread):
             self.api_key = ""
 
 
+class LiveReplayWorker(QThread):
+    """Replay a finished local recording to Live without showing interim text."""
+
+    status_changed = Signal(str)
+    text_ready = Signal(str)
+    request_succeeded = Signal()
+    failed = Signal(str)
+
+    def __init__(self, api_key: str, mode: str, audio_path: Path, vocabulary: list[str]) -> None:
+        super().__init__()
+        self.api_key = api_key
+        self.mode = mode
+        self.audio_path = audio_path
+        self.vocabulary = vocabulary
+
+    def run(self) -> None:
+        try:
+            asyncio.run(self._transcribe())
+        except Exception as error:
+            self.failed.emit(str(error).replace(self.api_key, "[hidden]"))
+        finally:
+            self.api_key = ""
+
+    async def _transcribe(self) -> None:
+        pcm = decode_file_to_pcm(self.audio_path)
+        audio_seconds = len(pcm) / (SAMPLE_RATE * 2)
+        if audio_seconds > LIVE_RECORDING_SECONDS + 2:
+            raise ValueError("这段录音超过 Live 安全时长，请改用普通 Transcribe。")
+        config = types.LiveConnectConfig(
+            response_modalities=["TEXT"],
+            input_audio_transcription=types.AudioTranscriptionConfig(
+                language_codes=[], custom_vocabulary=self.vocabulary, mode=self.mode
+            ),
+        )
+        client = genai.Client(api_key=self.api_key)
+        self.status_changed.emit("正在连接 Gemini Transcribe Live…")
+        final_parts: list[str] = []
+        async with client.aio.live.connect(model=LIVE_MODEL, config=config) as session:
+            async def receive() -> None:
+                async for response in session.receive():
+                    content = response.server_content
+                    if content and content.input_transcription and content.input_transcription.text:
+                        final_parts.append(content.input_transcription.text.strip())
+
+            receiver = asyncio.create_task(receive())
+            try:
+                self.status_changed.emit(f"正在用 Live 转写录音 · 约需 {clock_text(math.ceil(audio_seconds))}")
+                chunk_size = BLOCKSIZE * 2
+                loop = asyncio.get_running_loop()
+                started = loop.time()
+                for offset in range(0, len(pcm), chunk_size):
+                    if receiver.done():
+                        await receiver
+                        raise RuntimeError("Live 连接在录音发送完之前关闭。")
+                    await asyncio.sleep(max(0, started + offset / (SAMPLE_RATE * 2) - loop.time()))
+                    await session.send_realtime_input(
+                        audio=types.Blob(data=pcm[offset : offset + chunk_size], mime_type=f"audio/pcm;rate={SAMPLE_RATE}")
+                    )
+                await session.send_realtime_input(audio_stream_end=True)
+                self.status_changed.emit("录音已送完，正在收取最终转写…")
+                try:
+                    await asyncio.wait_for(asyncio.shield(receiver), timeout=LIVE_FINALIZATION_SECONDS)
+                except TimeoutError:
+                    pass  # The Live connection usually stays open after the final text arrives.
+            finally:
+                receiver.cancel()
+                with suppress(asyncio.CancelledError):
+                    await receiver
+        text = "\n".join(part for part in final_parts if part).strip()
+        if not text:
+            raise RuntimeError("Live 没有返回最终文字；录音仍保存在本机。")
+        self.text_ready.emit(text)
+        self.request_succeeded.emit()
+
+
 class DictationWindow(QWidget):
     def __init__(self) -> None:
         super().__init__()
-        self.worker: BatchTranscribeWorker | None = None
+        self.worker: BatchTranscribeWorker | LiveReplayWorker | None = None
         self.recorder: LocalRecorder | None = None
         self.microphones: list[Microphone] = []
         self.elapsed_seconds = 0
@@ -215,8 +342,8 @@ class DictationWindow(QWidget):
         self.key_verified = False
         self.session_path: Path | None = None
         self.setWindowTitle("Gemini Dictation")
-        self.setMinimumSize(780, 850)
-        self.resize(900, 900)
+        self.setMinimumSize(880, 980)
+        self.resize(1000, 1020)
         self._build_ui()
         self._load_microphones()
         self._refresh_key_status()
@@ -224,6 +351,9 @@ class DictationWindow(QWidget):
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self._tick)
+        self.level_timer = QTimer(self)
+        self.level_timer.setInterval(75)
+        self.level_timer.timeout.connect(self._update_level)
 
     def _build_ui(self) -> None:
         self.setStyleSheet(
@@ -270,16 +400,16 @@ class DictationWindow(QWidget):
         title = QLabel("Gemini Dictation")
         title.setObjectName("title")
         root.addWidget(title)
-        intro = QLabel("先录完整段，再一次提交转写。录音时不会发送音频，也不会提前显示文字。")
+        intro = QLabel("先在本机录音，结束后才发送；Live 转写完成前不显示文字。")
         intro.setObjectName("muted")
         root.addWidget(intro)
 
         settings = QFrame()
         settings.setObjectName("card")
-        settings.setFixedHeight(330)
+        settings.setFixedHeight(375)
         settings_layout = QVBoxLayout(settings)
         settings_layout.setContentsMargins(20, 16, 20, 18)
-        settings_layout.setSpacing(12)
+        settings_layout.setSpacing(8)
         section = QLabel("基本设置")
         section.setObjectName("section")
         settings_layout.addWidget(section)
@@ -299,7 +429,7 @@ class DictationWindow(QWidget):
 
         choices_container = QWidget()
         choices_container.setObjectName("choices")
-        choices_container.setFixedHeight(100)
+        choices_container.setFixedHeight(82)
         choices = QHBoxLayout(choices_container)
         choices.setContentsMargins(0, 0, 0, 0)
         mode_column = QVBoxLayout()
@@ -312,6 +442,17 @@ class DictationWindow(QWidget):
         mode_column.addWidget(self.mode_combo)
         choices.addLayout(mode_column, 1)
 
+        engine_column = QVBoxLayout()
+        engine_label = QLabel("转写引擎")
+        engine_label.setObjectName("muted")
+        self.engine_combo = QComboBox()
+        self.engine_combo.addItem("Transcribe Live · 推荐", "LIVE")
+        self.engine_combo.addItem("普通 Transcribe · 整段", "BATCH")
+        self.engine_combo.currentIndexChanged.connect(self._update_limit_hint)
+        engine_column.addWidget(engine_label)
+        engine_column.addWidget(self.engine_combo)
+        choices.addLayout(engine_column, 1)
+
         mic_column = QVBoxLayout()
         mic_label = QLabel("麦克风")
         mic_label.setObjectName("muted")
@@ -322,6 +463,9 @@ class DictationWindow(QWidget):
         mic_column.addWidget(self.mic_combo)
         choices.addLayout(mic_column, 1)
         settings_layout.addWidget(choices_container)
+        self.limit_label = QLabel()
+        self.limit_label.setObjectName("muted")
+        settings_layout.addWidget(self.limit_label)
         self.mic_status = QLabel()
         self.mic_status.setObjectName("muted")
         settings_layout.addWidget(self.mic_status)
@@ -334,7 +478,7 @@ class DictationWindow(QWidget):
         vocab_row.addWidget(self.vocabulary_button)
         settings_layout.addLayout(vocab_row)
         root.addWidget(settings)
-        root.addSpacing(28)
+        root.addSpacing(8)
 
         action_row = QHBoxLayout()
         self.record_button = QPushButton("开始录音")
@@ -345,9 +489,20 @@ class DictationWindow(QWidget):
         self.status_label = QLabel("准备就绪")
         self.status_label.setObjectName("muted")
         action_row.addWidget(self.status_label, 1)
-        self.timer_label = QLabel("00:00")
+        self.timer_label = QLabel("00:00 / 08:30")
         action_row.addWidget(self.timer_label)
         root.addLayout(action_row)
+
+        meter_row = QHBoxLayout()
+        level_label = QLabel("麦克风声量")
+        level_label.setObjectName("muted")
+        meter_row.addWidget(level_label)
+        self.level_meter = AudioLevelMeter()
+        meter_row.addWidget(self.level_meter, 1)
+        self.level_status = QLabel("录音时显示")
+        self.level_status.setObjectName("muted")
+        meter_row.addWidget(self.level_status)
+        root.addLayout(meter_row)
 
         transcript_card = QFrame()
         transcript_card.setObjectName("card")
@@ -367,15 +522,27 @@ class DictationWindow(QWidget):
         self.transcript = QPlainTextEdit()
         self.transcript.setPlaceholderText("结束录音并完成整段转写后，文字会出现在这里。")
         transcript_layout.addWidget(self.transcript, 1)
-        self.detail_label = QLabel("录音期间只保存在本机；停止后才发送给 Gemini 3.5 Transcribe。")
+        self.detail_label = QLabel("默认使用 Transcribe Live：录音时不上传，结束后按播放速度发送录音。")
         self.detail_label.setObjectName("muted")
         self.detail_label.setWordWrap(True)
         transcript_layout.addWidget(self.detail_label)
         root.addWidget(transcript_card, 1)
 
-        footer = QLabel("结束录音后，整段音频和词表会发送给 Gemini；API key、录音和转写文件不会提交到 Git。")
+        footer = QLabel("结束录音后，音频和词表会发送给 Gemini；API key、录音和转写文件不会提交到 Git。")
         footer.setObjectName("muted")
         root.addWidget(footer)
+        self._update_limit_hint()
+
+    def _recording_limit(self) -> int:
+        return LIVE_RECORDING_SECONDS if self.engine_combo.currentData() == "LIVE" else BATCH_RECORDING_SECONDS
+
+    def _update_limit_hint(self) -> None:
+        if self.engine_combo.currentData() == "LIVE":
+            self.limit_label.setText("Live 单次会话上限 10 分钟；请在 08:30 内结束，届时会自动停止并提交。")
+        else:
+            self.limit_label.setText("普通 Transcribe 可一次处理整段录音；本程序最多录 20 分钟，会消耗其请求额度。")
+        if self.recorder is None:
+            self.timer_label.setText(f"00:00 / {clock_text(self._recording_limit())}")
 
     def _load_microphones(self) -> None:
         try:
@@ -492,26 +659,33 @@ class DictationWindow(QWidget):
         self._session_key = key
         self._session_vocabulary = vocabulary
         self._session_mode = self.mode_combo.currentData()
+        self._session_engine = self.engine_combo.currentData()
         self.transcript.clear()
         self.transcript.setReadOnly(True)
         self.copy_button.setEnabled(False)
         self.had_error = False
         self.elapsed_seconds = 0
-        self.timer_label.setText("00:00")
+        self.timer_label.setText(f"00:00 / {clock_text(self._recording_limit())}")
         self.session_path = TRANSCRIPTS_DIR / f"session-{datetime.now():%Y%m%d-%H%M%S-%f}.txt"
         self.record_button.setText("结束录音")
         self.record_button.setProperty("recording", True)
         self.record_button.style().unpolish(self.record_button)
         self.record_button.style().polish(self.record_button)
         self.mode_combo.setEnabled(False)
+        self.engine_combo.setEnabled(False)
         self.mic_combo.setEnabled(False)
         self.vocabulary_button.setEnabled(False)
         self.status_label.setText("正在本地录音 · 尚未发送给 Gemini")
-        self.detail_label.setText("录音正在本机缓存。点击“结束录音”后，才会上传整段录音并转写。")
+        self.detail_label.setText("录音正在本机缓存。点击“结束录音”后，才开始向 Gemini 发送音频。")
         self.timer.start()
+        self.level_meter.clear()
+        self.level_status.setText("正在拾音")
+        self.level_timer.start()
 
     def _stop_recording(self) -> None:
         self.timer.stop()
+        self.level_timer.stop()
+        self.level_status.setText("录音已结束")
         self.record_button.setEnabled(False)
         recorder = self.recorder
         self.recorder = None
@@ -522,8 +696,13 @@ class DictationWindow(QWidget):
             self._reset_controls()
             QMessageBox.critical(self, "录音失败", str(error))
             return
-        self.detail_label.setText(f"录音已保存在本机：{audio_path.name}。正在整段转写…")
-        self.worker = BatchTranscribeWorker(
+        if self._session_engine == "LIVE":
+            self.detail_label.setText(f"录音已保存在本机：{audio_path.name}。正在按播放速度发送给 Live；完成后显示全文。")
+            worker_class = LiveReplayWorker
+        else:
+            self.detail_label.setText(f"录音已保存在本机：{audio_path.name}。正在提交给普通 Transcribe。")
+            worker_class = BatchTranscribeWorker
+        self.worker = worker_class(
             self._session_key, self._session_mode, audio_path, self._session_vocabulary
         )
         self._session_key = ""
@@ -536,10 +715,17 @@ class DictationWindow(QWidget):
 
     def _tick(self) -> None:
         self.elapsed_seconds += 1
-        minutes, seconds = divmod(self.elapsed_seconds, 60)
-        self.timer_label.setText(f"{minutes:02d}:{seconds:02d}")
-        if self.elapsed_seconds >= MAX_RECORDING_SECONDS and self.recorder is not None:
+        limit = self._recording_limit()
+        self.timer_label.setText(f"{clock_text(self.elapsed_seconds)} / {clock_text(limit)}")
+        if limit - self.elapsed_seconds == 30:
+            self.status_label.setText("还剩 30 秒，届时会自动结束录音并提交")
+        if self.elapsed_seconds >= limit and self.recorder is not None:
             self._stop_recording()
+
+    def _update_level(self) -> None:
+        if self.recorder is not None:
+            self.level_meter.push_level(self.recorder.level)
+            self.level_status.setText("正在拾音" if self.recorder.level > 5 else "声音偏小 / 安静")
 
     def _show_result(self, text: str) -> None:
         if text:
@@ -562,9 +748,11 @@ class DictationWindow(QWidget):
         self.record_button.style().unpolish(self.record_button)
         self.record_button.style().polish(self.record_button)
         self.mode_combo.setEnabled(True)
+        self.engine_combo.setEnabled(True)
         self.mic_combo.setEnabled(True)
         self.vocabulary_button.setEnabled(True)
         self.transcript.setReadOnly(False)
+        self.level_status.setText("录音时显示")
 
     def _worker_finished(self) -> None:
         self._reset_controls()
@@ -593,6 +781,8 @@ class DictationWindow(QWidget):
             except Exception:
                 pass
             self.recorder = None
+            self.timer.stop()
+            self.level_timer.stop()
             event.accept()
             return
         if self.worker and self.worker.isRunning():
