@@ -27,6 +27,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, help="Append finalized transcription to this UTF-8 file.")
     parser.add_argument("--device", help="Microphone device index or a matching name.")
     parser.add_argument("--mode", choices=("SMART", "VERBATIM"), default="SMART")
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=540,
+        help="Maximum session length in seconds (1-540; default: 540).",
+    )
     parser.add_argument("--list-devices", action="store_true", help="Print microphones and exit.")
     return parser.parse_args()
 
@@ -105,6 +111,8 @@ async def receive_transcripts(session: object, output_path: Path | None) -> None
 
 
 async def run(args: argparse.Namespace) -> None:
+    if not 1 <= args.duration <= 540:
+        raise ValueError("--duration must be between 1 and 540 seconds.")
     load_dotenv()
     if not os.environ.get("GEMINI_API_KEY"):
         raise RuntimeError("GEMINI_API_KEY is missing. Create an ignored .env file from .env.example.")
@@ -123,11 +131,15 @@ async def run(args: argparse.Namespace) -> None:
     device: str | int | None = int(args.device) if args.device and args.device.isdigit() else args.device
 
     print(f"Connecting to {MODEL} with {len(vocabulary)} vocabulary terms…")
-    print("Listening. Speak normally; press Ctrl+C to stop.\n")
-    async with client.aio.live.connect(model=MODEL, config=config) as session:
-        async with asyncio.TaskGroup() as group:
-            group.create_task(stream_audio(session, audio_queue, device))
-            group.create_task(receive_transcripts(session, args.output))
+    try:
+        async with asyncio.timeout(args.duration):
+            async with client.aio.live.connect(model=MODEL, config=config) as session:
+                print("Connected. Listening; press Ctrl+C to stop.\n")
+                async with asyncio.TaskGroup() as group:
+                    group.create_task(stream_audio(session, audio_queue, device))
+                    group.create_task(receive_transcripts(session, args.output))
+    except TimeoutError:
+        print(f"\nStopped after {args.duration} seconds.")
 
 
 def main() -> None:

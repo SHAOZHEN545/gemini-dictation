@@ -56,8 +56,9 @@ Press `Ctrl+C` to stop. `SMART` removes fillers and applies readable punctuation
 gemini-live-dictation --list-devices
 ```
 
-The Live Transcription session limit is 10 minutes. Start a new session when prompted; the
-`--output` file can be reused to continue appending final transcript segments.
+For a 15-second connection test, add `--duration 15`. Every run stops automatically after
+at most 540 seconds, below the Live Transcription 10-minute session limit. Run the command
+again to start a new session; the `--output` file can be reused to append final segments.
 
 ## Next steps
 
