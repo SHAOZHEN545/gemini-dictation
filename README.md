@@ -2,7 +2,8 @@
 
 Small, local-first Windows command-line dictation tool for `gemini-3.5-transcribe-live`.
 It streams 16 kHz mono microphone audio to Gemini and prints both interim and finalized
-transcription. Automatic language detection supports Chinese-English code switching.
+transcription. It can also stream a saved audio file at playback speed. Automatic language
+detection supports Chinese-English code switching.
 
 ## Privacy defaults
 
@@ -59,6 +60,15 @@ gemini-live-dictation --list-devices
 For a 15-second connection test, add `--duration 15`. Every run stops automatically after
 at most 540 seconds, below the Live Transcription 10-minute session limit. Run the command
 again to start a new session; the `--output` file can be reused to append final segments.
+
+To compare Live with a previous transcription of a saved recording:
+
+```powershell
+gemini-live-dictation --file "C:\Users\ustcy\Documents\test.m4a" --vocabulary config\vocabulary.txt --mode SMART --output transcripts\live-test.txt
+```
+
+The file is decoded locally and streamed at its original speed. Only final text is saved;
+the audio file is never copied into this repository.
 
 ## Next steps
 
