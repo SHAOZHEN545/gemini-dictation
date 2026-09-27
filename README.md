@@ -2,9 +2,11 @@
 
 ## 桌面版（Windows）
 
-这个项目现在有一个本地桌面界面。打开后选择 `VERBATIM` 或 `SMART`、选择麦克风，
-点“开始录音”说话，再点“结束录音”。最终文字会出现在窗口里，可以一键复制。
-录音过程中会显示临时预览；录音结束后，最终文字还会自动保存在本机的 `transcripts/`。
+这个项目有一个本地桌面界面。打开后选择 `VERBATIM` 或 `SMART`、选择麦克风，
+点“开始录音”说话，再点“结束录音”。录音期间只在本机缓存，不会发送给 Gemini，
+也不会提前显示转写。结束后，程序把整段录音一次提交给 `gemini-3.5-transcribe`。
+最终文字会出现在窗口里，可以一键复制，也会保存在本机的 `transcripts/`。
+录音文件保存在本机的 `recordings/`，两个文件夹都被 Git 忽略。
 
 在项目文件夹的 PowerShell 中首次安装桌面版：
 
@@ -18,14 +20,19 @@
 .\.venv\Scripts\gemini-live-gui.exe
 ```
 
-如果已有 `.env`，界面会自动使用其中的 API key；也可以在界面中粘贴新 key 并点击“保存 Key”。
-词表从本机 `config/vocabulary.txt` 读取。界面默认选择 `VERBATIM`，因为它会保留口述中的纠正；
-需要更整洁的文字时可切换到 `SMART`。单次录音最长约 9 分钟。
+如果已有 `.env`，界面会显示“已从本机读取”；成功转写后才显示“本次转写已成功验证”。
+也可以在界面中粘贴新 key 并点击“保存 Key”。点击“查看 / 编辑词表”可以检查并修改
+`config/vocabulary.txt`。转写时，音频和词表会发送给 Gemini；这些文件不会提交到 Git。
+麦克风列表只显示当前可打开的设备，并将重复的驱动入口合并。
+界面默认选择 `VERBATIM`，因为它会保留口述中的纠正；需要更整洁的文字时可切换到 `SMART`。
+单次录音最长 20 分钟。普通 Transcribe 的请求受账号额度限制。
 
 GitHub 可以保存这套程序的代码。浏览器直接使用的公开网页需要另外设计密钥服务，
 所以目前的桌面版在本机使用。
 
-Small, local-first Windows command-line dictation tool for `gemini-3.5-transcribe-live`.
+## 命令行 Live 实验
+
+The separate command-line tool streams microphone audio to `gemini-3.5-transcribe-live`.
 It streams 16 kHz mono microphone audio to Gemini and prints both interim and finalized
 transcription. It can also stream a saved audio file at playback speed. Automatic language
 detection supports Chinese-English code switching.

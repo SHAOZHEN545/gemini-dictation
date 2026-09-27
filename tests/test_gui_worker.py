@@ -1,88 +1,97 @@
-"""Offline check of the recording stop and finalization path."""
+"""Offline checks for record-first dictation and whole-file transcription."""
 
 from __future__ import annotations
 
-import asyncio
-import threading
+import os
+import tempfile
 import unittest
+import wave
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from PySide6.QtCore import QCoreApplication
+from PySide6.QtWidgets import QApplication
 
-from gemini_live_dictation.gui import LiveWorker
-
-
-class FakeSession:
-    def __init__(self) -> None:
-        self.sent_audio = 0
-        self.stream_ended = asyncio.Event()
-
-    async def send_realtime_input(self, *, audio=None, audio_stream_end=False) -> None:
-        if audio is not None:
-            self.sent_audio += 1
-        if audio_stream_end:
-            self.stream_ended.set()
-
-    async def receive(self):
-        await self.stream_ended.wait()
-        yield SimpleNamespace(
-            server_content=SimpleNamespace(
-                interim_input_transcription=None,
-                input_transcription=SimpleNamespace(text="测试 QUBIG"),
-            )
-        )
-        await asyncio.Event().wait()
-
-
-class FakeConnection:
-    def __init__(self, session: FakeSession) -> None:
-        self.session = session
-
-    async def __aenter__(self) -> FakeSession:
-        return self.session
-
-    async def __aexit__(self, *_args) -> None:
-        return None
+from gemini_live_dictation.gui import BatchTranscribeWorker, DictationWindow, LocalRecorder, Microphone
 
 
 class FakeInputStream:
     def __init__(self, *, callback, **_kwargs) -> None:
         self.callback = callback
+        self.started = False
 
-    def __enter__(self):
+    def start(self) -> None:
+        self.started = True
         self.callback(bytes(3200), 1600, None, None)
-        return self
 
-    def __exit__(self, *_args) -> None:
-        return None
+    def stop(self) -> None:
+        self.started = False
+
+    def close(self) -> None:
+        pass
 
 
-class GuiWorkerTests(unittest.IsolatedAsyncioTestCase):
+class GuiWorkerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.app = QCoreApplication.instance() or QCoreApplication([])
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        cls.app = QApplication.instance() or QApplication([])
 
-    async def test_stop_sends_audio_end_and_collects_final_text(self) -> None:
-        session = FakeSession()
-        client = SimpleNamespace(aio=SimpleNamespace(live=SimpleNamespace(connect=lambda **_: FakeConnection(session))))
-        worker = LiveWorker("test-key", "VERBATIM", 1, ["QUBIG"])
-        finals: list[str] = []
-        worker.final_received.connect(finals.append)
-        timer = threading.Timer(0.2, worker.request_stop)
+    def test_audio_stays_local_until_recording_stops(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "test.wav"
+            recorder = LocalRecorder(Microphone(1, "Test microphone", 48000, "WASAPI"), path)
+            with patch("gemini_live_dictation.gui.sd.RawInputStream", FakeInputStream):
+                recorder.start()
+                self.assertFalse(path.exists())
+                output = recorder.finish()
+            with wave.open(str(output), "rb") as recording:
+                self.assertEqual(recording.getframerate(), 48000)
+                self.assertEqual(recording.getnchannels(), 1)
+                self.assertEqual(len(recording.readframes(1600)), 3200)
+
+    def test_batch_worker_submits_whole_file_once_with_vocabulary(self) -> None:
+        uploaded = SimpleNamespace(uri="files/test.wav", mime_type="audio/wav")
+        client = SimpleNamespace(
+            files=SimpleNamespace(upload=Mock(return_value=uploaded)),
+            interactions=SimpleNamespace(create=Mock(return_value=SimpleNamespace(output_text="测试 QUBIG"))),
+        )
+        worker = BatchTranscribeWorker("test-key", "VERBATIM", Path("test.wav"), ["QUBIG"])
+        texts: list[str] = []
+        errors: list[str] = []
+        worker.text_ready.connect(texts.append)
+        worker.failed.connect(errors.append)
+        with patch("gemini_live_dictation.gui.genai.Client", return_value=client):
+            worker.run()
+        self.assertEqual(errors, [])
+        self.assertEqual(texts, ["测试 QUBIG"])
+        client.files.upload.assert_called_once_with(file="test.wav")
+        request = client.interactions.create.call_args.kwargs
+        self.assertEqual(request["model"], "gemini-3.5-transcribe")
+        self.assertEqual(request["generation_config"]["transcription_config"]["custom_vocabulary"], ["QUBIG"])
+        self.assertEqual(request["generation_config"]["transcription_config"]["mode"], {"type": "verbatim"})
+
+    def test_first_click_only_records_and_second_click_starts_transcription(self) -> None:
+        microphone = Microphone(1, "Test microphone", 48000, "WASAPI")
+        fake_recorder = Mock()
+        fake_recorder.finish.return_value = Path("test.wav")
         with (
-            patch("gemini_live_dictation.gui.genai.Client", return_value=client),
-            patch("gemini_live_dictation.gui.sd.RawInputStream", FakeInputStream),
-            patch("gemini_live_dictation.gui.FINALIZATION_WAIT_SECONDS", 0.1),
+            patch("gemini_live_dictation.gui.microphone_options", return_value=[microphone]),
+            patch("gemini_live_dictation.gui.sd.query_devices", return_value={"name": "Test microphone"}),
+            patch("gemini_live_dictation.gui.saved_api_key", return_value="test-key"),
+            patch("gemini_live_dictation.gui.read_vocabulary", return_value=["QUBIG"]),
+            patch("gemini_live_dictation.gui.LocalRecorder", return_value=fake_recorder),
+            patch.object(BatchTranscribeWorker, "start") as start_worker,
         ):
-            timer.start()
-            try:
-                await worker._transcribe()
-            finally:
-                timer.join()
-        self.assertGreater(session.sent_audio, 0)
-        self.assertTrue(session.stream_ended.is_set())
-        self.assertEqual(finals, ["测试 QUBIG"])
+            window = DictationWindow()
+            window._toggle_recording()
+            self.assertIsNone(window.worker)
+            fake_recorder.start.assert_called_once()
+            start_worker.assert_not_called()
+            window._toggle_recording()
+            fake_recorder.finish.assert_called_once()
+            start_worker.assert_called_once()
+            window.close()
 
 
 if __name__ == "__main__":

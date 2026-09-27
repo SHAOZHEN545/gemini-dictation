@@ -50,7 +50,7 @@ def read_vocabulary(path: Path | None) -> list[str]:
     # Preserve order while suppressing accidental duplicate entries.
     unique_terms = list(dict.fromkeys(terms))
     if len(unique_terms) > 1_000:
-        raise ValueError("Gemini Live accepts at most 1,000 custom vocabulary terms.")
+        raise ValueError("Gemini accepts at most 1,000 custom vocabulary terms.")
     return unique_terms
 
 
