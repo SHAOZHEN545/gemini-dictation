@@ -15,8 +15,12 @@ dependencies = [
   "python-dotenv>=1.0.0",
 ]
 
+[project.optional-dependencies]
+gui = ["PySide6>=6.8,<7"]
+
 [project.scripts]
 gemini-live-dictation = "gemini_live_dictation.cli:main"
+gemini-live-gui = "gemini_live_dictation.gui:main"
 
 [tool.setuptools.packages.find]
 include = ["gemini_live_dictation*"]

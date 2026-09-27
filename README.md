@@ -1,5 +1,30 @@
 # Gemini Live Dictation
 
+## 桌面版（Windows）
+
+这个项目现在有一个本地桌面界面。打开后选择 `VERBATIM` 或 `SMART`、选择麦克风，
+点“开始录音”说话，再点“结束录音”。最终文字会出现在窗口里，可以一键复制。
+录音过程中会显示临时预览；录音结束后，最终文字还会自动保存在本机的 `transcripts/`。
+
+在项目文件夹的 PowerShell 中首次安装桌面版：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[gui]"
+```
+
+以后可以直接双击项目里的 `Start Dictation.cmd`，或运行：
+
+```powershell
+.\.venv\Scripts\gemini-live-gui.exe
+```
+
+如果已有 `.env`，界面会自动使用其中的 API key；也可以在界面中粘贴新 key 并点击“保存 Key”。
+词表从本机 `config/vocabulary.txt` 读取。界面默认选择 `VERBATIM`，因为它会保留口述中的纠正；
+需要更整洁的文字时可切换到 `SMART`。单次录音最长约 9 分钟。
+
+GitHub 可以保存这套程序的代码。浏览器直接使用的公开网页需要另外设计密钥服务，
+所以目前的桌面版在本机使用。
+
 Small, local-first Windows command-line dictation tool for `gemini-3.5-transcribe-live`.
 It streams 16 kHz mono microphone audio to Gemini and prints both interim and finalized
 transcription. It can also stream a saved audio file at playback speed. Automatic language
@@ -72,6 +97,6 @@ the audio file is never copied into this repository.
 
 ## Next steps
 
-1. Verify microphone selection and transcription quality with a short controlled passage.
-2. Tune the private vocabulary list.
-3. Add a small GUI after the command-line workflow is stable.
+1. Try a short microphone dictation in the desktop app and check the selected input device.
+2. Tune the private vocabulary list for terms that are still misheard.
+3. Consider packaging the desktop app as a Windows executable after the interaction feels right.
