@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
+import time
 import unittest
 import wave
 from array import array
@@ -21,6 +22,8 @@ from gemini_live_dictation.gui import (
     LiveReplayWorker,
     LocalRecorder,
     Microphone,
+    VocabularyDialog,
+    join_live_transcripts,
 )
 
 
@@ -42,18 +45,26 @@ class FakeInputStream:
 
 class FakeLiveSession:
     def __init__(self) -> None:
+        self.events: list[str] = []
         self.audio_chunks: list[bytes] = []
         self.stream_ended = asyncio.Event()
 
-    async def send_realtime_input(self, *, audio=None, audio_stream_end=False) -> None:
+    async def send_realtime_input(self, *, audio=None, activity_start=None, activity_end=None) -> None:
+        if activity_start is not None:
+            self.events.append("start")
         if audio is not None:
+            self.events.append("audio")
             self.audio_chunks.append(audio.data)
-        if audio_stream_end:
+        if activity_end is not None:
+            self.events.append("end")
             self.stream_ended.set()
 
     async def receive(self):
         await self.stream_ended.wait()
-        yield SimpleNamespace(server_content=SimpleNamespace(input_transcription=SimpleNamespace(text="测试 QUBIG")))
+        yield SimpleNamespace(server_content=SimpleNamespace(
+            input_transcription=SimpleNamespace(text="测试 QUBIG"), generation_complete=None
+        ))
+        yield SimpleNamespace(server_content=SimpleNamespace(input_transcription=None, generation_complete=True))
         await asyncio.Event().wait()
 
 
@@ -73,6 +84,52 @@ class GuiWorkerTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_live_chunks_do_not_create_paragraphs(self) -> None:
+        self.assertEqual(join_live_transcripts(["其实当时的时候我们已经开始这个", "就是"]),
+                         "其实当时的时候我们已经开始这个就是")
+        self.assertEqual(join_live_transcripts(["Hello", "world.", "Again"]),
+                         "Hello world. Again")
+
+    def test_level_status_keeps_meter_width_when_message_changes(self) -> None:
+        with patch("gemini_live_dictation.gui.microphone_options", return_value=[]):
+            window = DictationWindow()
+            window.show()
+            self.app.processEvents()
+            meter_width = window.level_meter.width()
+            status_width = window.level_status.width()
+            for message in ("正在拾音", "声音偏小 / 安静", "录音已结束"):
+                window.level_status.setText(message)
+                self.app.processEvents()
+                self.assertEqual(window.level_status.width(), status_width)
+                self.assertEqual(window.level_meter.width(), meter_width)
+            window.close()
+
+    def test_vocabulary_dialog_sorts_flags_duplicates_and_saves(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "vocabulary.txt"
+            path.write_text("# note\nzeeman\n量子\nQUBIG\nfrancium\nQUBIG\n", encoding="utf-8")
+            dialog = VocabularyDialog(None, path)
+            rows = [dialog.list.item(row).text() for row in range(dialog.list.count())]
+            self.assertEqual(rows, ["francium", "QUBIG", "zeeman", "量子"])
+
+            dialog.entry.setText("qubig")
+            self.assertFalse(dialog.add_button.isEnabled())
+            self.assertIn("QUBIG", dialog.feedback.text())
+            dialog._add()
+            self.assertEqual(len(dialog.terms), 4)
+
+            dialog.entry.setText("Autler-Townes")
+            self.assertTrue(dialog.add_button.isEnabled())
+            dialog._add()
+            self.assertEqual(dialog.list.item(0).text(), "Autler-Townes")
+            self.assertEqual(dialog.entry.text(), "")
+
+            dialog.list.setCurrentRow(dialog.terms.index("zeeman"))
+            dialog._delete_selected()
+            dialog._save()
+            self.assertEqual(path.read_text(encoding="utf-8"),
+                             "# note\nAutler-Townes\nfrancium\nQUBIG\n量子\n")
 
     def test_audio_stays_local_until_recording_stops(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -100,14 +157,17 @@ class GuiWorkerTests(unittest.TestCase):
         with (
             patch("gemini_live_dictation.gui.decode_file_to_pcm", return_value=bytes(3200)),
             patch("gemini_live_dictation.gui.genai.Client", return_value=client),
-            patch("gemini_live_dictation.gui.LIVE_FINALIZATION_SECONDS", 0.05),
+            patch("gemini_live_dictation.gui.LIVE_FINALIZATION_SECONDS", 5),
         ):
+            started = time.monotonic()
             worker.run()
-        self.assertTrue(session.stream_ended.is_set())
-        self.assertEqual(len(session.audio_chunks), 1)
+        self.assertLess(time.monotonic() - started, 2, "generation_complete should end the wait early")
+        # The whole recording is one manual activity, so Live finalizes it with full context.
+        self.assertEqual(session.events, ["start", "audio", "end"])
         self.assertEqual(texts, ["测试 QUBIG"])
         request = connect.call_args.kwargs
         self.assertEqual(request["model"], "gemini-3.5-transcribe-live")
+        self.assertTrue(request["config"].realtime_input_config.automatic_activity_detection.disabled)
         self.assertEqual(request["config"].input_audio_transcription.custom_vocabulary, ["QUBIG"])
         self.assertEqual(request["config"].input_audio_transcription.mode, "SMART")
 

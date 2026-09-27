@@ -19,16 +19,20 @@ from dotenv import dotenv_values, set_key
 from google import genai
 from google.genai import types
 from PySide6.QtCore import QRectF, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QColor, QFont, QFontDatabase, QPainter
+from PySide6.QtGui import QCloseEvent, QColor, QFont, QFontDatabase, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListView,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -47,12 +51,34 @@ RECORDINGS_DIR = PROJECT_DIR / "recordings"
 BATCH_MODEL = "gemini-3.5-transcribe"
 LIVE_RECORDING_SECONDS = 510  # 8m30s leaves room within the Live model's 10-minute session.
 BATCH_RECORDING_SECONDS = 1200
-LIVE_FINALIZATION_SECONDS = 10
+LIVE_FINALIZATION_SECONDS = 30
+# Whole-recording replay: one manual activity keeps the full context in a single final transcript.
+# Live transcribes at roughly 4x playback speed and closes the connection once about 80-90 s of
+# unprocessed audio piles up (16x failed after 113 s of audio, 8x after 179 s). So send a short
+# head start, then pace at the processing speed: the backlog stays small and nothing is slower.
+LIVE_SEND_SPEED = 4
+LIVE_HEAD_START_SECONDS = 15
+LIVE_PROCESSING_SPEED = 4
 
 
 def clock_text(seconds: int) -> str:
     minutes, remaining = divmod(seconds, 60)
     return f"{minutes:02d}:{remaining:02d}"
+
+
+def join_live_transcripts(parts: list[str]) -> str:
+    """Join Live final chunks without treating chunk boundaries as paragraphs."""
+    result = ""
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if result and part[0].isascii() and part[0].isalnum() and result[-1].isascii() and (
+            result[-1].isalnum() or result[-1] in ".!?,:;"
+        ):
+            result += " "
+        result += part
+    return result
 
 
 def saved_api_key() -> str:
@@ -288,6 +314,9 @@ class LiveReplayWorker(QThread):
             input_audio_transcription=types.AudioTranscriptionConfig(
                 language_codes=[], custom_vocabulary=self.vocabulary, mode=self.mode
             ),
+            realtime_input_config=types.RealtimeInputConfig(
+                automatic_activity_detection=types.AutomaticActivityDetection(disabled=True)
+            ),
         )
         client = genai.Client(api_key=self.api_key)
         self.status_changed.emit("正在连接 Gemini Transcribe Live…")
@@ -298,10 +327,14 @@ class LiveReplayWorker(QThread):
                     content = response.server_content
                     if content and content.input_transcription and content.input_transcription.text:
                         final_parts.append(content.input_transcription.text.strip())
+                    if content and content.generation_complete:
+                        return
 
             receiver = asyncio.create_task(receive())
             try:
-                self.status_changed.emit(f"正在用 Live 转写录音 · 约需 {clock_text(math.ceil(audio_seconds))}")
+                estimate = math.ceil(audio_seconds / LIVE_PROCESSING_SPEED) + 5
+                self.status_changed.emit(f"正在用 Live 转写整段录音 · 约需 {clock_text(estimate)}")
+                await session.send_realtime_input(activity_start=types.ActivityStart())
                 chunk_size = BLOCKSIZE * 2
                 loop = asyncio.get_running_loop()
                 started = loop.time()
@@ -309,25 +342,166 @@ class LiveReplayWorker(QThread):
                     if receiver.done():
                         await receiver
                         raise RuntimeError("Live 连接在录音发送完之前关闭。")
-                    await asyncio.sleep(max(0, started + offset / (SAMPLE_RATE * 2) - loop.time()))
+                    audio_position = offset / (SAMPLE_RATE * 2)
+                    send_at = started + max(0, audio_position - LIVE_HEAD_START_SECONDS) / LIVE_SEND_SPEED
+                    await asyncio.sleep(max(0, send_at - loop.time()))
                     await session.send_realtime_input(
                         audio=types.Blob(data=pcm[offset : offset + chunk_size], mime_type=f"audio/pcm;rate={SAMPLE_RATE}")
                     )
-                await session.send_realtime_input(audio_stream_end=True)
-                self.status_changed.emit("录音已送完，正在收取最终转写…")
+                await session.send_realtime_input(activity_end=types.ActivityEnd())
+                self.status_changed.emit("录音已送完，正在等待整段转写…")
                 try:
-                    await asyncio.wait_for(asyncio.shield(receiver), timeout=LIVE_FINALIZATION_SECONDS)
+                    await asyncio.wait_for(
+                        asyncio.shield(receiver),
+                        timeout=LIVE_FINALIZATION_SECONDS + audio_seconds / LIVE_PROCESSING_SPEED * 2,
+                    )
                 except TimeoutError:
-                    pass  # The Live connection usually stays open after the final text arrives.
+                    pass  # Keep any final text that arrived; an empty result is reported below.
             finally:
                 receiver.cancel()
                 with suppress(asyncio.CancelledError):
                     await receiver
-        text = "\n".join(part for part in final_parts if part).strip()
+        text = join_live_transcripts(final_parts)
         if not text:
             raise RuntimeError("Live 没有返回最终文字；录音仍保存在本机。")
         self.text_ready.emit(text)
         self.request_succeeded.emit()
+
+
+def vocabulary_sort_key(term: str) -> tuple[bool, str]:
+    """Latin terms A-Z first (case-insensitive), then Chinese and other scripts."""
+    return (not term[:1].isascii(), term.casefold())
+
+
+class VocabularyDialog(QDialog):
+    """One sorted term per row; typing filters the list and flags duplicates."""
+
+    def __init__(self, parent: QWidget | None, path: Path) -> None:
+        super().__init__(parent)
+        self.path = path
+        lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+        self.comments = [line for line in lines if line.lstrip().startswith("#")]
+        terms = (line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#"))
+        self.terms = sorted(dict.fromkeys(terms), key=vocabulary_sort_key)
+
+        self.setWindowTitle("专业词表 · 查看与编辑")
+        self.resize(460, 640)
+        layout = QVBoxLayout(self)
+        hint = QLabel("按首字母排列。输入时即时筛选并提示重复；双击词条可修改，选中后按 Delete 删除。")
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        entry_row = QHBoxLayout()
+        self.entry = QLineEdit()
+        self.entry.setPlaceholderText("输入新词条，回车添加")
+        self.entry.textChanged.connect(self._filter)
+        self.entry.returnPressed.connect(self._add)
+        entry_row.addWidget(self.entry, 1)
+        self.add_button = QPushButton("添加")
+        self.add_button.clicked.connect(self._add)
+        entry_row.addWidget(self.add_button)
+        layout.addLayout(entry_row)
+        self.feedback = QLabel()
+        self.feedback.setObjectName("muted")
+        layout.addWidget(self.feedback)
+
+        self.list = QListWidget()
+        self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.list.setAlternatingRowColors(True)
+        self.list.itemDoubleClicked.connect(self._edit)
+        delete_shortcut = QShortcut(QKeySequence.StandardKey.Delete, self.list)
+        delete_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
+        delete_shortcut.activated.connect(self._delete_selected)
+        layout.addWidget(self.list, 1)
+
+        buttons = QHBoxLayout()
+        delete = QPushButton("删除所选")
+        delete.clicked.connect(self._delete_selected)
+        buttons.addWidget(delete)
+        buttons.addStretch()
+        cancel = QPushButton("取消")
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(cancel)
+        save = QPushButton("保存词表")
+        save.clicked.connect(self._save)
+        buttons.addWidget(save)
+        layout.addLayout(buttons)
+        self._render()
+
+    def _existing(self, term: str, ignore: str | None = None) -> str | None:
+        """Return the stored spelling if the term is already present, ignoring case."""
+        folded = term.casefold()
+        return next((t for t in self.terms if t.casefold() == folded and t != ignore), None)
+
+    def _render(self, select: str | None = None) -> None:
+        self.terms.sort(key=vocabulary_sort_key)
+        self.list.clear()
+        self.list.addItems(self.terms)
+        self._filter(self.entry.text())
+        if select in self.terms:
+            item = self.list.item(self.terms.index(select))
+            self.list.setCurrentItem(item)
+            self.list.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
+
+    def _filter(self, text: str) -> None:
+        query = text.strip().casefold()
+        matches = 0
+        for row, term in enumerate(self.terms):
+            hidden = bool(query) and query not in term.casefold()
+            self.list.item(row).setHidden(hidden)
+            matches += not hidden
+        existing = self._existing(text.strip()) if query else None
+        self.add_button.setEnabled(bool(query) and existing is None)
+        self.feedback.setStyleSheet("color: #f0b86e;" if existing is not None else "")
+        if existing is not None:
+            self.feedback.setText(f"已在词表中：{existing}")
+            self.list.setCurrentRow(self.terms.index(existing))
+        elif query:
+            self.feedback.setText(f"没有重复 · 有 {matches} 项包含这段文字")
+        else:
+            self.feedback.setText(f"共 {len(self.terms)} 项")
+
+    def _add(self) -> None:
+        term = self.entry.text().strip()
+        if not term or self._existing(term) is not None:
+            return
+        self.entry.clear()  # Clear first: this re-filters the list before the new term exists.
+        self.terms.append(term)
+        self._render(select=term)
+        self.feedback.setText(f"已添加：{term} · 共 {len(self.terms)} 项")
+
+    def _edit(self, item: QListWidgetItem) -> None:
+        old = item.text()
+        new, ok = QInputDialog.getText(self, "修改词条", "词条：", text=old)
+        new = new.strip()
+        if not ok or not new or new == old:
+            return
+        existing = self._existing(new, ignore=old)
+        if existing is not None:
+            QMessageBox.information(self, "重复词条", f"词表中已经有：{existing}")
+            return
+        self.terms[self.terms.index(old)] = new
+        self._render(select=new)
+
+    def _delete_selected(self) -> None:
+        selected = {item.text() for item in self.list.selectedItems() if not item.isHidden()}
+        if not selected:
+            return
+        self.terms = [term for term in self.terms if term not in selected]
+        self._render()
+
+    def _save(self) -> None:
+        if len(self.terms) > 1000:
+            QMessageBox.warning(self, "词表太长", "Gemini 最多接受 1000 个不同的词条。")
+            return
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text("\n".join(self.comments + self.terms) + "\n", encoding="utf-8")
+        except OSError as error:
+            QMessageBox.critical(self, "保存失败", str(error))
+            return
+        self.accept()
 
 
 class DictationWindow(QWidget):
@@ -372,6 +546,10 @@ class DictationWindow(QWidget):
                 padding: 9px; selection-background-color: #2c857e;
             }
             QComboBox { min-height: 24px; }
+            QListWidget { background: #0e192b; alternate-background-color: #122036;
+                          border: 1px solid #35506c; border-radius: 8px; padding: 4px; }
+            QListWidget::item { padding: 6px 8px; border-radius: 5px; }
+            QListWidget::item:selected { background: #27566a; color: #e9f0f7; }
             QComboBox QAbstractItemView { background: #172338; color: #e9f0f7;
                                           selection-background-color: #27566a;
                                           border: 1px solid #35506c; padding: 4px; }
@@ -501,6 +679,12 @@ class DictationWindow(QWidget):
         meter_row.addWidget(self.level_meter, 1)
         self.level_status = QLabel("录音时显示")
         self.level_status.setObjectName("muted")
+        self.level_status.setFixedWidth(
+            max(self.level_status.fontMetrics().horizontalAdvance(message) for message in (
+                "录音时显示", "正在拾音", "声音偏小 / 安静", "录音已结束"
+            )) + 8
+        )
+        self.level_status.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         meter_row.addWidget(self.level_status)
         root.addLayout(meter_row)
 
@@ -522,7 +706,7 @@ class DictationWindow(QWidget):
         self.transcript = QPlainTextEdit()
         self.transcript.setPlaceholderText("结束录音并完成整段转写后，文字会出现在这里。")
         transcript_layout.addWidget(self.transcript, 1)
-        self.detail_label = QLabel("默认使用 Transcribe Live：录音时不上传，结束后按播放速度发送录音。")
+        self.detail_label = QLabel("默认使用 Transcribe Live：录音时不上传，结束后以约 4 倍速发送整段录音。")
         self.detail_label.setObjectName("muted")
         self.detail_label.setWordWrap(True)
         transcript_layout.addWidget(self.detail_label)
@@ -591,39 +775,7 @@ class DictationWindow(QWidget):
         self.status_label.setText("API key 已保存到本机，等待首次转写验证")
 
     def _show_vocabulary(self) -> None:
-        dialog = QDialog(self)
-        dialog.setWindowTitle("专业词表 · 查看与编辑")
-        dialog.resize(560, 600)
-        layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel("每行一个词或短语；以 # 开头的行是注释。保存后，下次录音会使用新词表。"))
-        editor = QPlainTextEdit()
-        editor.setPlainText(VOCABULARY_PATH.read_text(encoding="utf-8") if VOCABULARY_PATH.is_file() else "")
-        layout.addWidget(editor, 1)
-        buttons = QHBoxLayout()
-        buttons.addStretch()
-        cancel = QPushButton("取消")
-        cancel.clicked.connect(dialog.reject)
-        buttons.addWidget(cancel)
-        save = QPushButton("保存词表")
-        buttons.addWidget(save)
-        layout.addLayout(buttons)
-
-        def save_vocabulary() -> None:
-            content = editor.toPlainText()
-            terms = [line.strip() for line in content.splitlines() if line.strip() and not line.lstrip().startswith("#")]
-            if len(set(terms)) > 1000:
-                QMessageBox.warning(dialog, "词表太长", "Gemini 最多接受 1000 个不同的词条。")
-                return
-            try:
-                VOCABULARY_PATH.parent.mkdir(parents=True, exist_ok=True)
-                VOCABULARY_PATH.write_text(content.rstrip() + "\n", encoding="utf-8")
-            except OSError as error:
-                QMessageBox.critical(dialog, "保存失败", str(error))
-                return
-            dialog.accept()
-
-        save.clicked.connect(save_vocabulary)
-        if dialog.exec():
+        if VocabularyDialog(self, VOCABULARY_PATH).exec():
             self._refresh_key_status()
             self.status_label.setText("专业词表已更新，下次录音生效")
 
@@ -697,7 +849,7 @@ class DictationWindow(QWidget):
             QMessageBox.critical(self, "录音失败", str(error))
             return
         if self._session_engine == "LIVE":
-            self.detail_label.setText(f"录音已保存在本机：{audio_path.name}。正在按播放速度发送给 Live；完成后显示全文。")
+            self.detail_label.setText(f"录音已保存在本机：{audio_path.name}。正在以约 4 倍速发送给 Live；完成后显示全文。")
             worker_class = LiveReplayWorker
         else:
             self.detail_label.setText(f"录音已保存在本机：{audio_path.name}。正在提交给普通 Transcribe。")
