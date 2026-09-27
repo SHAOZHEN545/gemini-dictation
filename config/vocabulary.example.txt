@@ -1,0 +1,5 @@
+# One term or phrase per line. Lines beginning with # are ignored.
+# Keep personal research terms in config/vocabulary.txt, which Git ignores.
+Gemini
+Kubernetes
+BigQuery

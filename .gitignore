@@ -1,0 +1,22 @@
+# Virtual environments and Python build artifacts
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Local credentials and personal configuration
+.env
+.env.*
+!.env.example
+config/vocabulary.txt
+
+# Dictation output and recordings may contain private research material
+transcripts/
+recordings/
+
+# Editors and operating-system files
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gemini-live-dictation"
+version = "0.1.0"
+description = "Private Windows command-line dictation using Gemini Live Transcription"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "google-genai>=1.0.0",
+  "sounddevice>=0.5.0",
+  "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+gemini-live-dictation = "gemini_live_dictation.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["gemini_live_dictation*"]
