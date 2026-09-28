@@ -13,6 +13,8 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.ExtractedText;
+import android.view.inputmethod.ExtractedTextRequest;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
@@ -29,6 +31,12 @@ public final class VoiceInputService extends InputMethodService {
     private final Handler main = new Handler(Looper.getMainLooper());
     private TextView status;
     private Button microphone;
+    private Button voiceTab;
+    private Button editTab;
+    private Button pasteButton;
+    private LinearLayout voicePanel;
+    private LinearLayout editPanel;
+    private String oneTimeCopy;
     private PcmRecorder recorder;
     private Future<?> transcription;
     private int editorSession;
@@ -54,9 +62,21 @@ public final class VoiceInputService extends InputMethodService {
         status.setTextSize(15);
         status.setText("点击麦克风开始录音");
         body.addView(status);
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        body.addView(row);
+        LinearLayout tabs = new LinearLayout(this);
+        tabs.setGravity(Gravity.CENTER_VERTICAL);
+        body.addView(tabs);
+        voiceTab = key(tabs, "🎙 语音", 2, () -> showPanel(false));
+        editTab = key(tabs, "✎ 编辑", 2, () -> showPanel(true));
+        key(tabs, "🌐", 1, () -> {
+            if (shouldOfferSwitchingToNextInputMethod()) switchToNextInputMethod(false);
+            else ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).showInputMethodPicker();
+        });
+        key(tabs, "⚙", 1, this::openSettings);
+
+        voicePanel = new LinearLayout(this);
+        voicePanel.setGravity(Gravity.CENTER_VERTICAL);
+        body.addView(voicePanel);
+        LinearLayout row = voicePanel;
         microphone = key(row, "🎙 录音", 2, this::toggleRecording);
         Button delete = key(row, "⌫", 1, () -> {
             if (!suppressDeleteClick) deleteOnce();
@@ -84,11 +104,22 @@ public final class VoiceInputService extends InputMethodService {
         });
         key(row, "空格", 1, () -> commit(" "));
         key(row, "换行", 1, this::enter);
-        key(row, "🌐", 1, () -> {
-            if (shouldOfferSwitchingToNextInputMethod()) switchToNextInputMethod(false);
-            else ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).showInputMethodPicker();
-        });
-        key(row, "⚙", 1, this::openSettings);
+
+        editPanel = new LinearLayout(this);
+        editPanel.setOrientation(LinearLayout.VERTICAL);
+        body.addView(editPanel);
+        LinearLayout arrows = new LinearLayout(this);
+        editPanel.addView(arrows);
+        key(arrows, "←", 1, () -> moveCursor(KeyEvent.KEYCODE_DPAD_LEFT));
+        key(arrows, "↑", 1, () -> moveCursor(KeyEvent.KEYCODE_DPAD_UP));
+        key(arrows, "↓", 1, () -> moveCursor(KeyEvent.KEYCODE_DPAD_DOWN));
+        key(arrows, "→", 1, () -> moveCursor(KeyEvent.KEYCODE_DPAD_RIGHT));
+        LinearLayout actions = new LinearLayout(this);
+        editPanel.addView(actions);
+        key(actions, "全选", 1, this::selectAll);
+        key(actions, "复制", 1, this::copyOnce);
+        pasteButton = key(actions, "粘贴一次", 1, this::pasteOnce);
+        showPanel(false);
         show(privateField ? "密码输入框已禁用语音" : "点击麦克风开始录音");
         updateUi();
         return body;
@@ -222,6 +253,53 @@ public final class VoiceInputService extends InputMethodService {
         target.commitText("\n", 1);
     }
 
+    private void showPanel(boolean editing) {
+        voicePanel.setVisibility(editing ? View.GONE : View.VISIBLE);
+        editPanel.setVisibility(editing ? View.VISIBLE : View.GONE);
+        voiceTab.setEnabled(editing);
+        editTab.setEnabled(!editing);
+        updateUi();
+    }
+
+    private void moveCursor(int keyCode) {
+        if (getCurrentInputConnection() == null) return;
+        sendDownUpKeyEvents(keyCode);
+    }
+
+    private void selectAll() {
+        InputConnection target = getCurrentInputConnection();
+        if (target == null) return;
+        if (target.performContextMenuAction(android.R.id.selectAll)) return;
+        ExtractedText extracted = target.getExtractedText(new ExtractedTextRequest(), 0);
+        if (extracted != null && extracted.text != null && extracted.startOffset >= 0 &&
+                target.setSelection(extracted.startOffset, extracted.startOffset + extracted.text.length())) return;
+        show("当前输入框不支持全选");
+    }
+
+    private void copyOnce() {
+        if (privateField) { show("密码输入框不能复制内容"); return; }
+        InputConnection target = getCurrentInputConnection();
+        if (target == null) return;
+        CharSequence selected = target.getSelectedText(0);
+        if (selected == null || selected.length() == 0) {
+            show("请先选中文字；可点“全选”");
+            return;
+        }
+        oneTimeCopy = selected.toString();
+        show("已暂存选中文字，粘贴一次后清除");
+        updateUi();
+    }
+
+    private void pasteOnce() {
+        InputConnection target = getCurrentInputConnection();
+        if (target == null || oneTimeCopy == null) return;
+        if (target.commitText(oneTimeCopy, 1)) {
+            oneTimeCopy = null;
+            show("已粘贴，暂存内容已清除");
+            updateUi();
+        } else show("当前输入框无法粘贴，暂存内容仍在");
+    }
+
     private void deleteOnce() {
         if (getCurrentInputConnection() != null) sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL);
     }
@@ -252,11 +330,13 @@ public final class VoiceInputService extends InputMethodService {
         if (microphone == null) return;
         microphone.setEnabled(!busy && !privateField);
         microphone.setText(recorder == null ? "🎙 录音" : "■ 结束");
+        if (pasteButton != null) pasteButton.setEnabled(oneTimeCopy != null);
     }
     private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + .5f); }
 
     @Override public void onDestroy() {
         resetSession();
+        oneTimeCopy = null;
         worker.shutdownNow();
         super.onDestroy();
     }

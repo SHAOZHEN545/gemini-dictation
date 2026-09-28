@@ -11,6 +11,7 @@ import android.provider.Settings;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
+import android.view.MotionEvent;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
@@ -33,6 +34,7 @@ public final class SettingsActivity extends Activity {
     private TextView status;
     private TextView fileStatus;
     private TextView keyStatus;
+    private TextView vocabularyCount;
     private EditText keyInput;
     private EditText termInput;
     private EditText filterInput;
@@ -114,17 +116,30 @@ public final class SettingsActivity extends Activity {
             @Override public void afterTextChanged(Editable text) { }
         });
         body.addView(filterInput);
-        label(body, "词条按首字母排列；点词条修改，长按删除。", 14);
+        label(body, "词条按字母和拼音排列；在下方列表内滑动浏览，点词条修改，长按删除。", 14);
+        vocabularyCount = label(body, "共 0 个词条", 14);
         ListView list = new ListView(this);
         vocabularyAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1);
         list.setAdapter(vocabularyAdapter);
+        list.setVerticalScrollBarEnabled(true);
+        list.setScrollbarFadingEnabled(false);
+        list.setFastScrollEnabled(true);
+        list.setFastScrollAlwaysVisible(true);
+        list.setOnTouchListener((view, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN)
+                view.getParent().requestDisallowInterceptTouchEvent(true);
+            else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL)
+                view.getParent().requestDisallowInterceptTouchEvent(false);
+            return false;
+        });
         list.setOnItemClickListener((parent, view, position, id) -> editTerm(vocabularyAdapter.getItem(position)));
         list.setOnItemLongClickListener((parent, view, position, id) -> {
             confirmDelete(vocabularyAdapter.getItem(position));
             return true;
         });
         list.setLayoutParams(new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(300)));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(360)));
         body.addView(list);
         button(body, "从 Drive 重新读取", this::requestReload);
         saveVocabularyButton = button(body, "保存修改到 Drive", this::saveVocabulary);
@@ -273,10 +288,13 @@ public final class SettingsActivity extends Activity {
     private void renderTerms() {
         if (vocabularyAdapter == null) return;
         String filter = filterInput.getText().toString().trim().toLowerCase(Locale.ROOT);
+        vocabularyAdapter.setNotifyOnChange(false);
         vocabularyAdapter.clear();
         for (String term : draft.terms()) {
             if (term.toLowerCase(Locale.ROOT).contains(filter)) vocabularyAdapter.add(term);
         }
+        vocabularyAdapter.notifyDataSetChanged();
+        vocabularyCount.setText("显示 " + vocabularyAdapter.getCount() + " / 共 " + draft.terms().size() + " 个词条");
     }
 
     private void saveVocabulary() {
