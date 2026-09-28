@@ -6,11 +6,10 @@ __pycache__/
 .pytest_cache/
 work/
 
-# Local credentials and personal configuration
+# Local credentials (the vocabulary is tracked so the web version can use it)
 .env
 .env.*
 !.env.example
-config/vocabulary.txt
 
 # Dictation output and recordings may contain private research material
 transcripts/

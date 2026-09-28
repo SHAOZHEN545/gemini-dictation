@@ -1,0 +1,362 @@
+:root {
+  color-scheme: dark;
+  --bg: #0d1524;
+  --card: #172338;
+  --border: #263954;
+  --field: #0e192b;
+  --field-border: #35506c;
+  --text: #e9f0f7;
+  --muted: #9fb0c5;
+  --accent: #35bba6;
+  --accent-hover: #58d5c1;
+  --button: #294362;
+  --button-hover: #345679;
+  --done: #9fe3d5;
+  --warn: #f0b86e;
+  --error: #ed7777;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+}
+
+main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+header p,
+header h1 {
+  margin: 0;
+}
+
+h1 {
+  font-size: 28px;
+  margin: 2px 0 6px;
+}
+
+.eyebrow {
+  color: #65d6c4;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.section {
+  font-size: 16px;
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+
+summary {
+  cursor: pointer;
+  list-style-position: outside;
+}
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.between {
+  justify-content: space-between;
+}
+
+.wrap {
+  flex-wrap: wrap;
+}
+
+.row > .muted {
+  min-width: 0;
+}
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.choices label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  font: inherit;
+  font-size: 16px; /* Keeps iOS from zooming into focused fields. */
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  padding: 9px 10px;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid #2c857e;
+  outline-offset: 0;
+}
+
+button,
+.button {
+  font: inherit;
+  font-weight: 650;
+  color: var(--text);
+  background: var(--button);
+  border: 0;
+  border-radius: 9px;
+  padding: 9px 14px;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+  flex-shrink: 0;
+}
+
+button:hover,
+.button:hover {
+  background: var(--button-hover);
+}
+
+button:disabled {
+  background: #263346;
+  color: #75869c;
+  cursor: default;
+}
+
+button.link {
+  background: none;
+  color: var(--muted);
+  padding: 4px 0;
+  text-decoration: underline;
+}
+
+.recorder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+button.record {
+  flex: 1 1 100%;
+  font-size: 18px;
+  padding: 16px 20px;
+  background: var(--accent);
+  color: #09211e;
+}
+
+button.record:hover {
+  background: var(--accent-hover);
+}
+
+button.record.recording {
+  background: var(--error);
+  color: #2b1010;
+}
+
+.actions #next,
+.actions .discard {
+  flex: 1 1 0;
+}
+
+button.discard {
+  background: transparent;
+  border: 1px solid #8a4a55;
+  color: #f2a0a0;
+}
+
+button.discard:hover {
+  background: #3a1f28;
+}
+
+#timer {
+  font-variant-numeric: tabular-nums;
+}
+
+.meter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#meter {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+}
+
+#level-status {
+  width: 7.5em;
+  text-align: right;
+  font-size: 13px;
+}
+
+.empty {
+  margin: 12px 0 0;
+}
+
+#jobs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#jobs:not(:empty) {
+  margin-top: 12px;
+}
+
+.job {
+  background: var(--field);
+  border: 1px solid var(--field-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.job-head {
+  font-size: 13px;
+}
+
+.job-state {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.job[data-state="done"] .job-state {
+  display: none;
+}
+
+.job[data-state="running"] .job-state {
+  color: var(--text);
+}
+
+.job[data-state="retry"] .job-state,
+.job .job-state.cooldown {
+  color: var(--warn);
+}
+
+.job[data-state="failed"] .job-state {
+  color: var(--error);
+}
+
+.job textarea {
+  resize: vertical;
+  min-height: 5em;
+  line-height: 1.6;
+  background: #0b1524;
+}
+
+.job-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.job-actions button {
+  padding: 7px 12px;
+}
+
+footer {
+  font-size: 13px;
+}
+
+dialog {
+  width: min(560px, calc(100vw - 24px));
+  max-height: calc(100dvh - 48px);
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+dialog form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#vocabulary-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  columns: 2 10em;
+  column-gap: 16px;
+  max-height: 55dvh;
+  overflow-y: auto;
+  background: var(--field);
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+}
+
+#vocabulary-list li {
+  padding: 3px 6px;
+  break-inside: avoid;
+}
+
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  background: #27566a;
+  color: var(--text);
+  padding: 10px 16px;
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 35%);
+  max-width: calc(100vw - 32px);
+}

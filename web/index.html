@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#0d1524" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Dictation" />
+    <title>Gemini Dictation</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icon-180.png" />
+    <link rel="stylesheet" href="style.css" />
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">PERSONAL TRANSCRIPTION STUDIO</p>
+        <h1>Gemini Dictation</h1>
+        <p class="muted">先在本设备录音，结束后才发送；每段在后台转写，录完一段就可以接着录下一段。</p>
+      </header>
+
+      <details class="card" id="settings">
+        <summary>
+          <span class="section">基本设置</span>
+          <span class="muted" id="settings-summary"></span>
+        </summary>
+        <div class="settings-body">
+          <form class="row" id="key-form" autocomplete="off">
+            <input id="key-input" type="password" placeholder="粘贴 API key（只保存在这个浏览器）" />
+            <button type="submit">保存 Key</button>
+          </form>
+          <div class="row between">
+            <span class="muted" id="key-status"></span>
+            <button type="button" class="link" id="forget-key" hidden>从本设备删除</button>
+          </div>
+          <div class="choices">
+            <label>
+              <span class="muted">转写模式</span>
+              <select id="mode">
+                <option value="VERBATIM">VERBATIM · 保留原话和纠正</option>
+                <option value="SMART">SMART · 自动整理语句</option>
+              </select>
+            </label>
+            <label>
+              <span class="muted">麦克风</span>
+              <select id="microphone"><option value="">系统默认</option></select>
+            </label>
+          </div>
+          <div class="row between">
+            <span class="muted" id="vocabulary-status">专业词表：读取中…</span>
+            <button type="button" id="show-vocabulary">查看词表</button>
+          </div>
+          <div class="row between">
+            <span class="muted">也可以转写手机里已有的录音（每段不超过 08:30）。</span>
+            <label class="button" for="import-file">导入音频</label>
+            <input id="import-file" type="file" accept="audio/*,video/*" multiple hidden />
+          </div>
+        </div>
+      </details>
+
+      <section class="recorder">
+        <div class="actions">
+          <button type="button" id="record" class="record">开始录音</button>
+          <button type="button" id="next" hidden>提交，录下一段</button>
+          <button type="button" id="discard" class="discard" hidden>× 放弃本段</button>
+        </div>
+        <div class="row between">
+          <span class="muted" id="status">准备就绪</span>
+          <span id="timer">00:00 / 08:30</span>
+        </div>
+        <div class="meter-row">
+          <canvas id="meter" aria-hidden="true"></canvas>
+          <span class="muted" id="level-status">录音时显示</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="row between wrap">
+          <div>
+            <span class="section">转写结果</span>
+            <span class="muted" id="queue-summary"></span>
+          </div>
+          <div class="row">
+            <button type="button" id="clear-done" disabled>清除已完成</button>
+            <button type="button" id="copy-all" disabled>复制全部</button>
+          </div>
+        </div>
+        <p class="muted empty" id="empty">录完一段就提交，不必等待转写，可以马上录下一段；每段独立转写，完成后显示在这里，可以直接修改后复制。</p>
+        <ol id="jobs"></ol>
+      </section>
+
+      <footer class="muted">
+        结束录音后，音频和词表会发送给 Gemini。录音只在转写完成前暂存在这个浏览器，成功后自动删除；
+        文字保留在这个浏览器里，直到你清除。转写时请让页面保持在前台。
+      </footer>
+    </main>
+
+    <dialog id="vocabulary-dialog">
+      <form method="dialog">
+        <div class="row between">
+          <span class="section">专业词表</span>
+          <button value="close">关闭</button>
+        </div>
+        <input id="vocabulary-filter" type="search" placeholder="筛选词条" />
+        <ul id="vocabulary-list"></ul>
+        <p class="muted">在电脑上用桌面版编辑 config/vocabulary.txt，提交并推送到 GitHub 后，网页版会自动更新。</p>
+      </form>
+    </dialog>
+
+    <div id="toast" role="status" hidden></div>
+  </body>
+</html>

@@ -209,8 +209,8 @@ class GuiWorkerTests(unittest.TestCase):
         """A window with a fake microphone; worker threads are never actually started."""
         microphone = Microphone(1, "Test microphone", 48000, "WASAPI")
         fake_recorder = Mock()
-        fake_recorder.finish.return_value = Path("test.wav")
         directory = stack.enter_context(tempfile.TemporaryDirectory())
+        fake_recorder.finish.return_value = Path(directory) / "test.wav"
         for target, value in (
             ("microphone_options", [microphone]),
             ("sd.query_devices", {"name": "Test microphone"}),
@@ -340,6 +340,28 @@ class GuiWorkerTests(unittest.TestCase):
             self.assertEqual(window.jobs[-1].number, 5)
             self._settle(window.jobs[-1], text="第五段")
             self.assertTrue(window._job_item(window.jobs[-1]).text().endswith("✓ 第五段"))
+
+    def test_recording_is_deleted_once_its_transcript_is_saved(self) -> None:
+        with ExitStack() as stack:
+            window, fake_recorder, _start = self._recording_window(stack)
+            directory = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+            takes = iter(directory / name for name in ("one.wav", "two.wav"))
+
+            def finish() -> Path:
+                path = next(takes)
+                path.write_bytes(b"audio")
+                return path
+
+            fake_recorder.finish.side_effect = finish
+            for _ in range(2):
+                window._toggle_recording()
+                window._toggle_recording()
+            done, failed = window.jobs
+            self._settle(done, text="第一段")
+            self._settle(failed, error="400 API key not valid")
+            self.assertEqual(done.transcript_path.read_text(encoding="utf-8"), "第一段\n")
+            self.assertFalse(done.audio_path.exists())
+            self.assertTrue(failed.audio_path.exists(), "a failed take is kept for retrying")
 
     def test_retry_delay_follows_server_hint_and_skips_hopeless_errors(self) -> None:
         self.assertEqual(retry_delay("1011 None. You exceeded your current quota", 1), 10)

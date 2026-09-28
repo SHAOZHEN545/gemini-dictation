@@ -916,7 +916,7 @@ class DictationWindow(QWidget):
             self.key_status.setText("API key：尚未设置")
         try:
             count = len(read_vocabulary(VOCABULARY_PATH)) if VOCABULARY_PATH.is_file() else 0
-            self.vocabulary_status.setText(f"专业词表：{count} 项（本机文件，不会提交到 Git）")
+            self.vocabulary_status.setText(f"专业词表：{count} 项（config/vocabulary.txt，推送到 GitHub 后网页版同步）")
         except Exception as error:
             self.vocabulary_status.setText(f"词表需要检查：{error}")
 
@@ -1083,6 +1083,9 @@ class DictationWindow(QWidget):
             job.state = "done"
             job.error = ""
             if self._save_transcript(job):
+                # The text is safely on disk, so the recording has served its purpose.
+                with suppress(OSError):
+                    job.audio_path.unlink(missing_ok=True)
                 self.status_label.setText(f"第 {job.number} 段转写完成，已保存在本机")
             else:
                 self.status_label.setText(f"第 {job.number} 段转写完成，但保存失败")
@@ -1201,7 +1204,7 @@ class DictationWindow(QWidget):
             self.transcript.setPlaceholderText(
                 f"这一段正在后台转写，完成后会显示在这里。你可以继续录下一段。{last_error}"
             )
-            self.detail_label.setText(f"录音已保存在本机：recordings/{job.audio_path.name}")
+            self.detail_label.setText(f"录音暂存在本机，转写完成后自动删除：recordings/{job.audio_path.name}")
         self.detail_label.setToolTip(self.detail_label.text())
         self._update_job_buttons()
 
