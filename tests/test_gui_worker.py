@@ -9,6 +9,7 @@ import time
 import unittest
 import wave
 from array import array
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -24,6 +25,7 @@ from gemini_live_dictation.gui import (
     Microphone,
     VocabularyDialog,
     join_live_transcripts,
+    retry_delay,
 )
 
 
@@ -147,6 +149,17 @@ class GuiWorkerTests(unittest.TestCase):
                 self.assertEqual(len(recording.readframes(3200)), 6400)
             self.assertGreater(len(decode_file_to_pcm(output)), 0)
 
+    def test_discarded_take_writes_no_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "test.wav"
+            recorder = LocalRecorder(Microphone(1, "Test microphone", 48000, "WASAPI"), path)
+            with patch("gemini_live_dictation.gui.sd.RawInputStream", FakeInputStream):
+                recorder.start()
+                recorder.discard()
+            self.assertIsNone(recorder.stream)
+            self.assertEqual(len(recorder.samples), 0)
+            self.assertFalse(path.exists())
+
     def test_live_replay_uses_saved_audio_and_only_emits_final_text(self) -> None:
         session = FakeLiveSession()
         connect = Mock(return_value=FakeLiveConnection(session))
@@ -192,22 +205,36 @@ class GuiWorkerTests(unittest.TestCase):
         self.assertEqual(request["generation_config"]["transcription_config"]["custom_vocabulary"], ["QUBIG"])
         self.assertEqual(request["generation_config"]["transcription_config"]["mode"], {"type": "verbatim"})
 
-    def test_first_click_only_records_and_second_click_starts_transcription(self) -> None:
+    def _recording_window(self, stack: ExitStack) -> tuple[DictationWindow, Mock, Mock]:
+        """A window with a fake microphone; worker threads are never actually started."""
         microphone = Microphone(1, "Test microphone", 48000, "WASAPI")
         fake_recorder = Mock()
         fake_recorder.finish.return_value = Path("test.wav")
-        with (
-            patch("gemini_live_dictation.gui.microphone_options", return_value=[microphone]),
-            patch("gemini_live_dictation.gui.sd.query_devices", return_value={"name": "Test microphone"}),
-            patch("gemini_live_dictation.gui.saved_api_key", return_value="test-key"),
-            patch("gemini_live_dictation.gui.read_vocabulary", return_value=["QUBIG"]),
-            patch("gemini_live_dictation.gui.LocalRecorder", return_value=fake_recorder),
-            patch.object(LiveReplayWorker, "start") as start_worker,
+        directory = stack.enter_context(tempfile.TemporaryDirectory())
+        for target, value in (
+            ("microphone_options", [microphone]),
+            ("sd.query_devices", {"name": "Test microphone"}),
+            ("saved_api_key", "test-key"),
+            ("read_vocabulary", ["QUBIG"]),
+            ("LocalRecorder", fake_recorder),
         ):
-            window = DictationWindow()
+            stack.enter_context(patch(f"gemini_live_dictation.gui.{target}", return_value=value))
+        stack.enter_context(patch("gemini_live_dictation.gui.TRANSCRIPTS_DIR", Path(directory)))
+        start_worker = stack.enter_context(patch.object(LiveReplayWorker, "start"))
+        return DictationWindow(), fake_recorder, start_worker
+
+    @staticmethod
+    def _settle(job, *, text: str = "", error: str = "") -> None:
+        job._set_text(text)
+        job._set_error(error)
+        job._worker_finished()
+
+    def test_can_record_next_segment_while_previous_transcribes(self) -> None:
+        with ExitStack() as stack:
+            window, fake_recorder, start_worker = self._recording_window(stack)
             self.assertEqual(window.engine_combo.currentData(), "LIVE")
             window._toggle_recording()
-            self.assertIsNone(window.worker)
+            self.assertEqual(window.jobs, [])
             self.assertTrue(window.level_timer.isActive())
             fake_recorder.start.assert_called_once()
             start_worker.assert_not_called()
@@ -215,7 +242,113 @@ class GuiWorkerTests(unittest.TestCase):
             self.assertFalse(window.level_timer.isActive())
             fake_recorder.finish.assert_called_once()
             start_worker.assert_called_once()
-            window.close()
+            # The first segment is still transcribing, yet recording again is allowed at once.
+            self.assertEqual(window.jobs[0].state, "running")
+            self.assertTrue(window.record_button.isEnabled())
+            window._toggle_recording()
+            self.assertEqual(fake_recorder.start.call_count, 2)
+            # One click submits the current segment and keeps recording the next one.
+            window._submit_and_record_next()
+            self.assertEqual(len(window.jobs), 2)
+            self.assertIsNotNone(window.recorder)
+            self.assertEqual(fake_recorder.start.call_count, 3)
+            self.assertEqual(start_worker.call_count, 2)
+
+    def test_discard_throws_away_the_take_without_submitting(self) -> None:
+        with ExitStack() as stack:
+            window, fake_recorder, start_worker = self._recording_window(stack)
+            self.assertFalse(window.discard_button.isVisibleTo(window))
+            window._toggle_recording()
+            self.assertTrue(window.discard_button.isVisibleTo(window))
+            window._discard_recording()
+            fake_recorder.discard.assert_called_once()
+            fake_recorder.finish.assert_not_called()
+            start_worker.assert_not_called()
+            self.assertEqual(window.jobs, [])
+            self.assertIsNone(window.recorder)
+            self.assertFalse(window.level_timer.isActive())
+            self.assertFalse(window.discard_button.isVisibleTo(window))
+            self.assertTrue(window.record_button.isEnabled())
+            self.assertIn("放弃", window.status_label.text())
+            # The discarded take does not use up a segment number.
+            window._toggle_recording()
+            window._toggle_recording()
+            self.assertEqual(window.jobs[0].number, 1)
+
+    def test_queue_limits_parallel_jobs_and_waits_out_quota_refusals(self) -> None:
+        with ExitStack() as stack:
+            window, _recorder, _start = self._recording_window(stack)
+            for _ in range(4):
+                window._toggle_recording()
+                window._toggle_recording()
+            self.assertEqual([job.state for job in window.jobs], ["running"] * 3 + ["queued"])
+
+            first, second, _third, fourth = window.jobs
+            self._settle(first, error="1011 None. You exceeded your current quota, please check your plan.")
+            self.assertEqual(first.state, "retry")
+            self.assertEqual(fourth.state, "queued", "a quota refusal pauses new starts")
+            self.assertIn("限流冷却", window.queue_label.text())
+
+            first.retry_at = window.cooldown_until = 0.0
+            window._dispatch_jobs()
+            self.assertEqual(first.state, "running")
+            self.assertEqual(first.attempts, 2)
+            self.assertEqual(fourth.state, "queued", "still three in flight")
+
+            self._settle(second, text="第二段")
+            self.assertEqual(second.state, "done")
+            self.assertEqual(second.transcript_path.read_text(encoding="utf-8"), "第二段\n")
+            self.assertEqual(fourth.state, "running")
+            self.assertEqual(window.transcript.toPlainText(), "第二段")
+
+            self._settle(first, text="第一段")
+            window._copy_all()
+            self.assertEqual(QApplication.clipboard().text(), "第一段\n\n第二段")
+
+    def test_list_removal_keeps_files_and_skips_jobs_still_transcribing(self) -> None:
+        with ExitStack() as stack:
+            window, _recorder, _start = self._recording_window(stack)
+            for _ in range(4):
+                window._toggle_recording()
+                window._toggle_recording()
+            first, second, third, fourth = window.jobs
+            self._settle(first, text="第一段")
+            self._settle(second, error="400 API key not valid")
+            self._settle(third, text="第三段")
+            self.assertEqual(second.state, "failed")
+
+            # An edit made in the window is written to disk before its row is removed.
+            window.job_list.setCurrentItem(window._job_item(first))
+            window.transcript.setPlainText("第一段（改）")
+            for job in (first, second, fourth):
+                window._job_item(job).setSelected(True)
+            window._remove_selected()
+            self.assertEqual(window.jobs, [third, fourth], "the running job stays in the list")
+            self.assertEqual(window.job_list.count(), 2)
+            self.assertIn("1 段还在转写", window.status_label.text())
+            self.assertEqual(first.transcript_path.read_text(encoding="utf-8"), "第一段（改）\n")
+
+            window._copy_all()
+            self.assertEqual(QApplication.clipboard().text(), "第三段")
+            window._clear_done()
+            self.assertEqual(window.jobs, [fourth])
+            self.assertTrue(third.transcript_path.exists())
+
+            # Numbering stays unique after removals, and rows still map to the right job.
+            window._toggle_recording()
+            window._toggle_recording()
+            self.assertEqual(window.jobs[-1].number, 5)
+            self._settle(window.jobs[-1], text="第五段")
+            self.assertTrue(window._job_item(window.jobs[-1]).text().endswith("✓ 第五段"))
+
+    def test_retry_delay_follows_server_hint_and_skips_hopeless_errors(self) -> None:
+        self.assertEqual(retry_delay("1011 None. You exceeded your current quota", 1), 10)
+        self.assertEqual(retry_delay("429 RESOURCE_EXHAUSTED. Please retry in 44.2s.", 1), 46)
+        self.assertEqual(retry_delay("Live 连接在录音发送完之前关闭。", 2), 30)
+        self.assertIsNone(retry_delay("1011 quota", 4))
+        self.assertIsNone(retry_delay("400 API key not valid. Please pass a valid API key.", 1))
+        self.assertIsNone(retry_delay("这段录音超过 Live 安全时长，请改用普通 Transcribe。", 1))
+        self.assertIsNone(retry_delay("Audio file was not found", 1))
 
     def test_live_limit_warns_and_auto_stops(self) -> None:
         microphone = Microphone(1, "Test microphone", 48000, "WASAPI")
