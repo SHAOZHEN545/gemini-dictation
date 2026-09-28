@@ -336,7 +336,7 @@ dialog form {
   padding: 4px;
   columns: 2 10em;
   column-gap: 16px;
-  max-height: 55dvh;
+  max-height: 28dvh;
   overflow-y: auto;
   background: var(--field);
   border: 1px solid var(--field-border);
@@ -346,6 +346,11 @@ dialog form {
 #vocabulary-list li {
   padding: 3px 6px;
   break-inside: avoid;
+}
+
+#vocabulary-editor {
+  max-height: 28dvh;
+  resize: vertical;
 }
 
 #toast {

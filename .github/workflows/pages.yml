@@ -1,10 +1,10 @@
-# Publish the browser version (web/) plus the shared vocabulary to GitHub Pages on every push to main.
+# Publish only the browser app. Personal vocabulary stays on the user's device.
 name: Deploy web app
 
 on:
   push:
     branches: [main]
-    paths: ["web/**", "config/vocabulary.txt", ".github/workflows/pages.yml"]
+    paths: ["web/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -28,7 +28,6 @@ jobs:
         run: |
           mkdir _site
           cp -r web/. _site/
-          if [ -f config/vocabulary.txt ]; then cp config/vocabulary.txt _site/vocabulary.txt; fi
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

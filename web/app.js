@@ -9,8 +9,8 @@ const RETRY_BACKOFF_SECONDS = [10, 30, 60];
 const QUOTA_ERROR = /\b(429|409)\b|resource.?exhausted|quota|rate.?limit/i;
 const TRANSIENT_ERROR = /\b(1006|1011|1013|500|502|503|504)\b|unavailable|overloaded|deadline|timed? ?out|connection|连接|没有返回/i;
 const FATAL_ERROR = /api.?key|permission|\b(400|401|403)\b|安全时长/i;
-const VOCABULARY_SOURCES = ["vocabulary.txt", "../config/vocabulary.txt"]; // Deployed copy, then local checkout.
 const KEY_STORAGE = "gemini-api-key";
+const VOCABULARY_STORAGE = "personal-vocabulary";
 
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -40,6 +40,8 @@ const ui = {
   vocabularyDialog: $("vocabulary-dialog"),
   vocabularyFilter: $("vocabulary-filter"),
   vocabularyList: $("vocabulary-list"),
+  vocabularyEditor: $("vocabulary-editor"),
+  saveVocabulary: $("save-vocabulary"),
   toast: $("toast"),
 };
 
@@ -107,31 +109,25 @@ function recordingLimit() {
 function parseVocabulary(text) {
   const terms = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
   const unique = [...new Set(terms)];
-  if (unique.length > 1000) throw new Error("Gemini 最多接受 1,000 个专业词条。");
+  if (unique.length > 1000) throw new Error("Gemini 最多接受 1,000 个词条。");
   return unique;
 }
 
-async function loadVocabulary() {
-  for (const source of VOCABULARY_SOURCES) {
-    try {
-      const response = await fetch(source, { cache: "no-cache" });
-      if (!response.ok) continue;
-      vocabulary = parseVocabulary(await response.text());
-      localStorage.setItem("vocabulary-cache", JSON.stringify(vocabulary));
-      ui.vocabularyStatus.textContent = `专业词表：${vocabulary.length} 项（随网页同步）`;
-      refreshSettingsSummary();
-      return;
-    } catch (error) {
-      if (error.message.includes("1,000")) {
-        ui.vocabularyStatus.textContent = `词表需要检查：${error.message}`;
-        return;
-      }
+function loadVocabulary() {
+  const saved = localStorage.getItem(VOCABULARY_STORAGE);
+  try {
+    if (saved !== null) {
+      vocabulary = parseVocabulary(saved);
+    } else {
+      // Keep terms already cached by earlier versions of the web app.
+      const legacy = JSON.parse(localStorage.getItem("vocabulary-cache") || "[]");
+      vocabulary = parseVocabulary(Array.isArray(legacy) ? legacy.join("\n") : "");
+      if (vocabulary.length) localStorage.setItem(VOCABULARY_STORAGE, vocabulary.join("\n"));
     }
+    ui.vocabularyStatus.textContent = `个人词库：${vocabulary.length} 项（仅本设备）`;
+  } catch (error) {
+    ui.vocabularyStatus.textContent = `个人词库需要检查：${error.message}`;
   }
-  vocabulary = JSON.parse(localStorage.getItem("vocabulary-cache") || "[]");
-  ui.vocabularyStatus.textContent = vocabulary.length
-    ? `专业词表：${vocabulary.length} 项（离线，使用上次同步的版本）`
-    : "专业词表：没有找到，将不带词表转写";
   refreshSettingsSummary();
 }
 
@@ -157,7 +153,7 @@ function renderVocabulary() {
 
 function refreshSettingsSummary() {
   const key = apiKey() ? (keyVerified ? "Key 已验证" : "Key 已保存") : "未设置 Key";
-  ui.settingsSummary.textContent = `${key} · ${ui.mode.value} · 词表 ${vocabulary.length} 项`;
+  ui.settingsSummary.textContent = `${key} · ${ui.mode.value} · 个人词库 ${vocabulary.length} 项`;
 }
 
 function refreshKeyStatus() {
@@ -605,10 +601,25 @@ ui.clearDone.addEventListener("click", () => {
 
 ui.showVocabulary.addEventListener("click", () => {
   ui.vocabularyFilter.value = "";
+  ui.vocabularyEditor.value = vocabulary.join("\n");
   renderVocabulary();
   ui.vocabularyDialog.showModal();
 });
 ui.vocabularyFilter.addEventListener("input", renderVocabulary);
+ui.saveVocabulary.addEventListener("click", () => {
+  try {
+    const terms = parseVocabulary(ui.vocabularyEditor.value);
+    localStorage.setItem(VOCABULARY_STORAGE, terms.join("\n"));
+    vocabulary = terms;
+    ui.vocabularyEditor.value = terms.join("\n");
+    ui.vocabularyStatus.textContent = `个人词库：${terms.length} 项（仅本设备）`;
+    refreshSettingsSummary();
+    renderVocabulary();
+    toast(`已保存 ${terms.length} 个词条`);
+  } catch (error) {
+    toast(error.message);
+  }
+});
 
 window.addEventListener("beforeunload", (event) => {
   if (recorder || jobs.some((job) => job.state === "running")) event.preventDefault();

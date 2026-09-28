@@ -52,8 +52,8 @@
             </label>
           </div>
           <div class="row between">
-            <span class="muted" id="vocabulary-status">专业词表：读取中…</span>
-            <button type="button" id="show-vocabulary">查看词表</button>
+            <span class="muted" id="vocabulary-status">个人词库：读取中…</span>
+            <button type="button" id="show-vocabulary">查看 / 编辑词库</button>
           </div>
           <div class="row between">
             <span class="muted">也可以转写手机里已有的录音（每段不超过 08:30）。</span>
@@ -95,7 +95,7 @@
       </section>
 
       <footer class="muted">
-        结束录音后，音频和词表会发送给 Gemini。录音只在转写完成前暂存在这个浏览器，成功后自动删除；
+        结束录音后，音频和个人词库中的词条会发送给 Gemini。录音只在转写完成前暂存在这个浏览器，成功后自动删除；
         文字保留在这个浏览器里，直到你清除。转写时请让页面保持在前台。
       </footer>
     </main>
@@ -103,12 +103,15 @@
     <dialog id="vocabulary-dialog">
       <form method="dialog">
         <div class="row between">
-          <span class="section">专业词表</span>
+          <span class="section">个人词库</span>
           <button value="close">关闭</button>
         </div>
         <input id="vocabulary-filter" type="search" placeholder="筛选词条" />
         <ul id="vocabulary-list"></ul>
-        <p class="muted">在电脑上用桌面版编辑 config/vocabulary.txt，提交并推送到 GitHub 后，网页版会自动更新。</p>
+        <label for="vocabulary-editor">编辑词库（每行一个词条）</label>
+        <textarea id="vocabulary-editor" rows="8" spellcheck="false"></textarea>
+        <button type="button" id="save-vocabulary">保存到本设备</button>
+        <p class="muted">个人词库只保存在这个浏览器；清除网站数据会删除它。桌面版目前使用本机的 config/vocabulary.txt。</p>
       </form>
     </dialog>
 

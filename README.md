@@ -1,5 +1,9 @@
 # Gemini Live Dictation
 
+## Android 语音输入法（测试版）
+
+`android/` 中新增 Android 系统输入法：可以在三星手机的其他 App 输入框里点击麦克风口述，转写结果直接输入。词库通过 Android 系统文件选择器授权读写 Google Drive 中的一份 `.txt` 文件；Gemini API Key 从 Bitwarden 粘贴后加密保存在手机本地。安装和使用步骤见 [Android 说明](android/README.md)。
+
 ## 桌面版（Windows）
 
 这个项目有一个本地桌面界面。打开后选择 `VERBATIM` 或 `SMART`、选择麦克风，
@@ -37,10 +41,10 @@
 ```
 
 如果已有 `.env`，界面会显示“已从本机读取”；成功转写后才显示“本次转写已成功验证”。
-也可以在界面中粘贴新 key 并点击“保存 Key”。点击“查看 / 编辑词表”可以检查并修改
+也可以在界面中粘贴新 key 并点击“保存 Key”。点击“查看 / 编辑词库”可以检查并修改
 `config/vocabulary.txt`：词条按首字母竖向排列，输入新词时会即时筛选并提示是否重复
-（不区分大小写），双击可修改，选中后按 Delete 删除。转写时，音频和词表会发送给 Gemini。
-词表文件纳入 Git：改完后提交并推送，网页版会自动用上新词表。
+（不区分大小写），双击可修改，选中后按 Delete 删除。转写时，音频和个人词库中的词条会发送给 Gemini。
+词库文件仅保存在本机，不会再随网站发布。
 麦克风列表只显示当前可打开的设备，并将重复的驱动入口合并。
 界面默认选择 `VERBATIM`，因为它会保留口述中的纠正；需要更整洁的文字时可切换到 `SMART`。
 Live 单次会话的官方上限为 10 分钟，界面把录音限制在 8 分 30 秒并自动停止，给连接和
@@ -52,8 +56,9 @@ Live 单次会话的官方上限为 10 分钟，界面把录音限制在 8 分 3
 
 `web/` 是同一套流程的网页版，不需要安装：先在设备上录音，结束后整段交给 Live 转写，
 可以连续录多段，排队、限流重试和桌面版一样。网页是纯静态文件，推送到 `main` 后由
-GitHub Actions 发布到 GitHub Pages，`config/vocabulary.txt` 会一起发布，所以每台设备
-自动用同一份词表（网页只能查看，编辑请用桌面版）。
+GitHub Actions 发布到 GitHub Pages。点击“查看 / 编辑词库”可在网页编辑个人词库，
+它只保存在当前浏览器；此前网页版缓存的词条会在首次打开新版时迁移到本机词库。
+桌面版仍使用本机的 `config/vocabulary.txt`，目前两者不会自动同步。
 
 - **API key**：网页代码里没有 key。每台设备第一次打开时从 Bitwarden 粘贴一次，只存在
   那个浏览器的本地存储里；音频从设备直接发给 Google，中间没有别的服务器。
@@ -82,7 +87,8 @@ detection supports Chinese-English code switching.
 
 - The API key is read from `GEMINI_API_KEY`, optionally via an ignored `.env` file.
 - `transcripts/` and `recordings/` are ignored by Git.
-- `config/vocabulary.txt` is tracked (and published with the web version) so every device shares it.
+- `config/vocabulary.txt` is ignored by Git and no longer included in the web deployment.
+- The web vocabulary is stored locally in each browser. Earlier commits and deployments may still contain the old vocabulary; removing it from the current site does not erase history or caches.
 - No API key, audio recording, or transcript is included in source control.
 
 ## Setup (Windows PowerShell)
@@ -115,7 +121,7 @@ If `config/vocabulary.txt` does not exist yet, create it from the example:
 Copy-Item config\vocabulary.example.txt config\vocabulary.txt
 ```
 
-Add one term or phrase per line. The file is tracked by Git and published with the web version. Gemini accepts
+Add one term or phrase per line. The file stays local and is ignored by Git. Gemini accepts
 up to 1,000 terms; Google recommends keeping the active list to roughly 100 or fewer.
 
 ## Run

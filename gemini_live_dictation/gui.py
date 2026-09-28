@@ -481,7 +481,7 @@ class VocabularyDialog(QDialog):
         terms = (line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#"))
         self.terms = sorted(dict.fromkeys(terms), key=vocabulary_sort_key)
 
-        self.setWindowTitle("专业词表 · 查看与编辑")
+        self.setWindowTitle("个人词库 · 查看与编辑")
         self.resize(460, 640)
         layout = QVBoxLayout(self)
         hint = QLabel("按首字母排列。输入时即时筛选并提示重复；双击词条可修改，选中后按 Delete 删除。")
@@ -520,7 +520,7 @@ class VocabularyDialog(QDialog):
         cancel = QPushButton("取消")
         cancel.clicked.connect(self.reject)
         buttons.addWidget(cancel)
-        save = QPushButton("保存词表")
+        save = QPushButton("保存词库")
         save.clicked.connect(self._save)
         buttons.addWidget(save)
         layout.addLayout(buttons)
@@ -552,7 +552,7 @@ class VocabularyDialog(QDialog):
         self.add_button.setEnabled(bool(query) and existing is None)
         self.feedback.setStyleSheet("color: #f0b86e;" if existing is not None else "")
         if existing is not None:
-            self.feedback.setText(f"已在词表中：{existing}")
+            self.feedback.setText(f"已在个人词库中：{existing}")
             self.list.setCurrentRow(self.terms.index(existing))
         elif query:
             self.feedback.setText(f"没有重复 · 有 {matches} 项包含这段文字")
@@ -576,7 +576,7 @@ class VocabularyDialog(QDialog):
             return
         existing = self._existing(new, ignore=old)
         if existing is not None:
-            QMessageBox.information(self, "重复词条", f"词表中已经有：{existing}")
+            QMessageBox.information(self, "重复词条", f"个人词库中已经有：{existing}")
             return
         self.terms[self.terms.index(old)] = new
         self._render(select=new)
@@ -590,7 +590,7 @@ class VocabularyDialog(QDialog):
 
     def _save(self) -> None:
         if len(self.terms) > 1000:
-            QMessageBox.warning(self, "词表太长", "Gemini 最多接受 1000 个不同的词条。")
+            QMessageBox.warning(self, "词库太长", "Gemini 最多接受 1000 个不同的词条。")
             return
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -755,7 +755,7 @@ class DictationWindow(QWidget):
         self.vocabulary_status = QLabel()
         self.vocabulary_status.setObjectName("muted")
         vocab_row.addWidget(self.vocabulary_status, 1)
-        self.vocabulary_button = QPushButton("查看 / 编辑词表")
+        self.vocabulary_button = QPushButton("查看 / 编辑词库")
         self.vocabulary_button.clicked.connect(self._show_vocabulary)
         vocab_row.addWidget(self.vocabulary_button)
         settings_layout.addLayout(vocab_row)
@@ -870,7 +870,7 @@ class DictationWindow(QWidget):
         transcript_layout.addWidget(self.detail_label)
         root.addWidget(transcript_card, 1)
 
-        footer = QLabel("结束录音后，音频和词表会发送给 Gemini；API key、录音和转写文件不会提交到 Git。")
+        footer = QLabel("结束录音后，音频和个人词库中的词条会发送给 Gemini；API key、录音和转写文件不会提交到 Git。")
         footer.setObjectName("muted")
         root.addWidget(footer)
         self._update_limit_hint()
@@ -916,9 +916,9 @@ class DictationWindow(QWidget):
             self.key_status.setText("API key：尚未设置")
         try:
             count = len(read_vocabulary(VOCABULARY_PATH)) if VOCABULARY_PATH.is_file() else 0
-            self.vocabulary_status.setText(f"专业词表：{count} 项（config/vocabulary.txt，推送到 GitHub 后网页版同步）")
+            self.vocabulary_status.setText(f"个人词库：{count} 项（仅保存在本机 config/vocabulary.txt）")
         except Exception as error:
-            self.vocabulary_status.setText(f"词表需要检查：{error}")
+            self.vocabulary_status.setText(f"个人词库需要检查：{error}")
 
     def _save_key(self) -> None:
         key = self.key_input.text().strip()
@@ -939,7 +939,7 @@ class DictationWindow(QWidget):
     def _show_vocabulary(self) -> None:
         if VocabularyDialog(self, VOCABULARY_PATH).exec():
             self._refresh_key_status()
-            self.status_label.setText("专业词表已更新，下次录音生效")
+            self.status_label.setText("个人词库已更新，下次录音生效")
 
     def _toggle_recording(self) -> None:
         if self.recorder is not None:
@@ -973,7 +973,7 @@ class DictationWindow(QWidget):
         try:
             vocabulary = read_vocabulary(VOCABULARY_PATH) if VOCABULARY_PATH.is_file() else []
         except (OSError, ValueError) as error:
-            QMessageBox.critical(self, "词表错误", str(error))
+            QMessageBox.critical(self, "个人词库错误", str(error))
             return
         selected_index = self.mic_combo.currentData()
         microphone = next((item for item in self.microphones if item.index == selected_index), None)

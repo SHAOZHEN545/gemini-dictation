@@ -6,10 +6,11 @@ __pycache__/
 .pytest_cache/
 work/
 
-# Local credentials (the vocabulary is tracked so the web version can use it)
+# Local credentials and personal vocabulary
 .env
 .env.*
 !.env.example
+config/vocabulary.txt
 
 # Dictation output and recordings may contain private research material
 transcripts/
@@ -20,3 +21,9 @@ recordings/
 .idea/
 Thumbs.db
 .DS_Store
+
+# Android build output and machine-specific SDK configuration
+android/.gradle/
+android/.idea/
+android/local.properties
+android/**/build/
