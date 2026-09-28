@@ -27,3 +27,6 @@ android/.gradle/
 android/.idea/
 android/local.properties
 android/**/build/
+
+# User-provided screenshots and other remote attachments
+.codex-remote-attachments/

@@ -24,7 +24,7 @@ jobs:
           gradle-version: '8.9'
       - name: Build installable debug APK
         working-directory: android
-        run: gradle :app:assembleDebug
+        run: gradle :app:testDebugUnitTest :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
           name: gemini-dictation-keyboard-debug

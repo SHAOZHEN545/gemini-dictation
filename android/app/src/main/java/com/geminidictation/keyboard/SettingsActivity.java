@@ -2,22 +2,27 @@ package com.geminidictation.keyboard;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.text.Editable;
 import android.text.InputType;
-import android.view.View;
+import android.text.TextWatcher;
+import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import java.util.List;
 import java.io.IOException;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -29,7 +34,14 @@ public final class SettingsActivity extends Activity {
     private TextView fileStatus;
     private TextView keyStatus;
     private EditText keyInput;
-    private EditText vocabularyInput;
+    private EditText termInput;
+    private EditText filterInput;
+    private ArrayAdapter<String> vocabularyAdapter;
+    private VocabularyDraft draft = new VocabularyDraft("");
+    private Button saveVocabularyButton;
+    private boolean dirty;
+    private boolean saving;
+    private boolean loading;
     private volatile String loadedVocabulary;
 
     @Override public void onCreate(Bundle savedInstanceState) {
@@ -80,17 +92,43 @@ public final class SettingsActivity extends Activity {
         label(body, "个人词库 · Google Drive", 18);
         label(body, "点“选择”后在系统文件选择器中进入 Google Drive，选一份可编辑的 .txt 文件。应用只获得这一个文件的读写权限。", 15);
         fileStatus = label(body, VocabularyStore.selectedUri(this) == null ? "尚未选择文件" : "已选择词库文件", 14);
-        button(body, "选择已有词库文件", () -> pickFile(false));
-        button(body, "在 Google Drive 新建词库文件", () -> pickFile(true));
-        vocabularyInput = new EditText(this);
-        vocabularyInput.setHint("每行一个词条；# 开头的行是注释");
-        vocabularyInput.setMinLines(10);
-        vocabularyInput.setGravity(android.view.Gravity.TOP);
-        vocabularyInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE |
-                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        body.addView(vocabularyInput);
-        button(body, "从 Drive 重新读取", this::loadVocabulary);
-        button(body, "保存词库到 Drive", this::saveVocabulary);
+        button(body, "选择已有词库文件", () -> requestPickFile(false));
+        button(body, "在 Google Drive 新建词库文件", () -> requestPickFile(true));
+        label(body, "添加词条（每次输入一个）", 16);
+        termInput = new EditText(this);
+        termInput.setHint("输入词条后点添加或键盘完成键");
+        termInput.setSingleLine(true);
+        termInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        termInput.setOnEditorActionListener((view, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_DONE) { addTerm(); return true; }
+            return false;
+        });
+        body.addView(termInput);
+        button(body, "添加到词库", this::addTerm);
+        filterInput = new EditText(this);
+        filterInput.setHint("筛选词条");
+        filterInput.setSingleLine(true);
+        filterInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence text, int start, int before, int count) { renderTerms(); }
+            @Override public void afterTextChanged(Editable text) { }
+        });
+        body.addView(filterInput);
+        label(body, "词条按首字母排列；点词条修改，长按删除。", 14);
+        ListView list = new ListView(this);
+        vocabularyAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1);
+        list.setAdapter(vocabularyAdapter);
+        list.setOnItemClickListener((parent, view, position, id) -> editTerm(vocabularyAdapter.getItem(position)));
+        list.setOnItemLongClickListener((parent, view, position, id) -> {
+            confirmDelete(vocabularyAdapter.getItem(position));
+            return true;
+        });
+        list.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(300)));
+        body.addView(list);
+        button(body, "从 Drive 重新读取", this::requestReload);
+        saveVocabularyButton = button(body, "保存修改到 Drive", this::saveVocabulary);
+        saveVocabularyButton.setEnabled(false);
 
         label(body, "输入法设置", 18);
         button(body, "启用 Gemini 语音输入", () -> startActivity(new Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)));
@@ -99,7 +137,23 @@ public final class SettingsActivity extends Activity {
             manager.showInputMethodPicker();
         });
         label(body, "在其他 App 的输入框里切换到 Gemini 语音输入。点击麦克风开始录音，再点一次结束；转写完成后文字会写入当前输入框。", 15);
-        if (VocabularyStore.selectedUri(this) != null) loadVocabulary();
+        if (savedInstanceState != null && savedInstanceState.containsKey("draft")) {
+            draft = new VocabularyDraft(savedInstanceState.getString("draft", ""));
+            loadedVocabulary = savedInstanceState.getString("loaded");
+            dirty = savedInstanceState.getBoolean("dirty");
+            renderTerms();
+            saveVocabularyButton.setEnabled(dirty);
+        } else if (VocabularyStore.selectedUri(this) != null) loadVocabulary();
+    }
+
+    private void requestPickFile(boolean create) {
+        if (saving || loading) { message("请等词库读取或保存完成"); return; }
+        if (!dirty) { pickFile(create); return; }
+        new AlertDialog.Builder(this)
+                .setMessage("切换词库文件会放弃尚未保存的词条修改。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("继续", (dialog, which) -> pickFile(create))
+                .show();
     }
 
     private void pickFile(boolean create) {
@@ -118,33 +172,122 @@ public final class SettingsActivity extends Activity {
         try {
             VocabularyStore.select(this, data);
             loadedVocabulary = null;
+            draft = new VocabularyDraft("");
+            dirty = false;
+            renderTerms();
+            saveVocabularyButton.setEnabled(false);
             fileStatus.setText("已授权读取和写入：" + data.getData().getLastPathSegment());
             loadVocabulary();
         } catch (Exception error) { message("词库授权失败：" + error.getMessage()); }
     }
 
+    private void requestReload() {
+        if (saving) { message("请等词库保存完成"); return; }
+        if (!dirty) { loadVocabulary(); return; }
+        new AlertDialog.Builder(this)
+                .setMessage("重新读取会放弃尚未保存的词条修改。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("重新读取", (dialog, which) -> loadVocabulary())
+                .show();
+    }
+
     private void loadVocabulary() {
+        if (VocabularyStore.selectedUri(this) == null) { message("请先选择 Drive 词库文件"); return; }
+        if (loading || saving) return;
+        loading = true;
         message("正在从 Drive 读取词库…");
         worker.execute(() -> {
             try {
                 String text = VocabularyStore.read(this);
-                List<String> terms = VocabularyStore.parse(text);
+                VocabularyDraft next = new VocabularyDraft(text);
                 runOnUiThread(() -> {
-                    vocabularyInput.setText(text);
+                    loading = false;
+                    draft = next;
                     loadedVocabulary = text;
-                    message("已读取 " + terms.size() + " 个词条");
+                    dirty = false;
+                    saveVocabularyButton.setEnabled(false);
+                    renderTerms();
+                    message("已读取 " + draft.terms().size() + " 个词条");
                 });
-            } catch (Exception error) { runOnUiThread(() -> message("读取失败：" + error.getMessage())); }
+            } catch (Exception error) { runOnUiThread(() -> {
+                loading = false;
+                message("读取失败：" + error.getMessage());
+            }); }
         });
     }
 
+    private void addTerm() {
+        if (saving || loading) { message("请等词库读取或保存完成"); return; }
+        if (loadedVocabulary == null) { message("请先选择并读取 Drive 词库文件"); return; }
+        try {
+            draft.add(termInput.getText().toString());
+            termInput.setText("");
+            markDirty();
+        } catch (IllegalArgumentException error) {
+            termInput.setError(error.getMessage());
+        }
+    }
+
+    private void editTerm(String old) {
+        if (old == null) return;
+        if (saving || loading) { message("请等词库读取或保存完成"); return; }
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText(old);
+        input.selectAll();
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("修改词条")
+                .setView(input)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("保存", null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            try {
+                draft.replace(old, input.getText().toString());
+                markDirty();
+                dialog.dismiss();
+            } catch (IllegalArgumentException error) { input.setError(error.getMessage()); }
+        }));
+        dialog.show();
+    }
+
+    private void confirmDelete(String term) {
+        if (term == null) return;
+        if (saving || loading) { message("请等词库读取或保存完成"); return; }
+        new AlertDialog.Builder(this)
+                .setMessage("删除词条“" + term + "”？")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("删除", (dialog, which) -> {
+                    draft.remove(term);
+                    markDirty();
+                }).show();
+    }
+
+    private void markDirty() {
+        dirty = true;
+        renderTerms();
+        saveVocabularyButton.setEnabled(true);
+        message("已更新列表 · 点击“保存修改到 Drive”同步");
+    }
+
+    private void renderTerms() {
+        if (vocabularyAdapter == null) return;
+        String filter = filterInput.getText().toString().trim().toLowerCase(Locale.ROOT);
+        vocabularyAdapter.clear();
+        for (String term : draft.terms()) {
+            if (term.toLowerCase(Locale.ROOT).contains(filter)) vocabularyAdapter.add(term);
+        }
+    }
+
     private void saveVocabulary() {
-        String text = vocabularyInput.getText().toString();
+        if (saving || loading) return;
+        String text = draft.serialize();
         String expected = loadedVocabulary;
         if (expected == null) { message("请先读取词库，再保存修改"); return; }
-        try { VocabularyStore.parse(text); }
-        catch (Exception error) { message(error.getMessage()); return; }
+        if (!dirty) { message("词库没有待保存的修改"); return; }
         message("正在保存到 Drive…");
+        saving = true;
+        saveVocabularyButton.setEnabled(false);
         worker.execute(() -> {
             try {
                 if (!VocabularyStore.read(this).equals(expected))
@@ -152,9 +295,15 @@ public final class SettingsActivity extends Activity {
                 VocabularyStore.write(this, text);
                 runOnUiThread(() -> {
                     loadedVocabulary = text;
-                    message("词库已保存到选中的文件");
+                    saving = false;
+                    dirty = false;
+                    message("词库已保存到 Drive · " + draft.terms().size() + " 个词条");
                 });
-            } catch (Exception error) { runOnUiThread(() -> message("保存失败：" + error.getMessage())); }
+            } catch (Exception error) { runOnUiThread(() -> {
+                saving = false;
+                saveVocabularyButton.setEnabled(true);
+                message("保存失败：" + error.getMessage());
+            }); }
         });
     }
 
@@ -167,16 +316,24 @@ public final class SettingsActivity extends Activity {
         return view;
     }
 
-    private void button(LinearLayout parent, String text, Runnable action) {
+    private Button button(LinearLayout parent, String text, Runnable action) {
         Button button = new Button(this);
         button.setText(text);
         button.setAllCaps(false);
         button.setOnClickListener(view -> action.run());
         parent.addView(button);
+        return button;
     }
 
     private void message(String text) { status.setText(text); }
     private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + .5f); }
+
+    @Override protected void onSaveInstanceState(Bundle outState) {
+        outState.putString("draft", draft.serialize());
+        outState.putString("loaded", loadedVocabulary);
+        outState.putBoolean("dirty", dirty);
+        super.onSaveInstanceState(outState);
+    }
 
     @Override protected void onDestroy() {
         worker.shutdownNow();

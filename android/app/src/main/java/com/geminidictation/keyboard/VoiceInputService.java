@@ -9,6 +9,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
@@ -32,6 +34,15 @@ public final class VoiceInputService extends InputMethodService {
     private int editorSession;
     private boolean busy;
     private boolean privateField;
+    private boolean deleting;
+    private boolean suppressDeleteClick;
+    private final Runnable repeatDelete = new Runnable() {
+        @Override public void run() {
+            if (!deleting) return;
+            deleteOnce();
+            main.postDelayed(this, 65);
+        }
+    };
 
     @Override public View onCreateInputView() {
         LinearLayout body = new LinearLayout(this);
@@ -47,12 +58,32 @@ public final class VoiceInputService extends InputMethodService {
         row.setGravity(Gravity.CENTER_VERTICAL);
         body.addView(row);
         microphone = key(row, "🎙 录音", 2, this::toggleRecording);
-        key(row, "⌫", 1, () -> {
-            InputConnection target = getCurrentInputConnection();
-            if (target != null) target.deleteSurroundingTextInCodePoints(1, 0);
+        Button delete = key(row, "⌫", 1, () -> {
+            if (!suppressDeleteClick) deleteOnce();
+        });
+        delete.setOnTouchListener((view, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                deleting = true;
+                view.setPressed(true);
+                deleteOnce();
+                main.postDelayed(repeatDelete, 400);
+                return true;
+            }
+            if (event.getActionMasked() == MotionEvent.ACTION_UP ||
+                    event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                stopDeleting();
+                view.setPressed(false);
+                if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+                    suppressDeleteClick = true;
+                    view.performClick(); // Keep the button accessible without deleting twice.
+                    suppressDeleteClick = false;
+                }
+                return true;
+            }
+            return deleting;
         });
         key(row, "空格", 1, () -> commit(" "));
-        key(row, "↵", 1, this::enter);
+        key(row, "换行", 1, this::enter);
         key(row, "🌐", 1, () -> {
             if (shouldOfferSwitchingToNextInputMethod()) switchToNextInputMethod(false);
             else ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).showInputMethodPicker();
@@ -161,6 +192,7 @@ public final class VoiceInputService extends InputMethodService {
 
     private void resetSession() {
         editorSession++;
+        stopDeleting();
         if (recorder != null) recorder.discard();
         recorder = null;
         if (transcription != null) transcription.cancel(true);
@@ -186,12 +218,17 @@ public final class VoiceInputService extends InputMethodService {
 
     private void enter() {
         InputConnection target = getCurrentInputConnection();
-        EditorInfo info = getCurrentInputEditorInfo();
         if (target == null) return;
-        int action = info == null ? EditorInfo.IME_ACTION_NONE : info.imeOptions & EditorInfo.IME_MASK_ACTION;
-        if (action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED)
-            target.performEditorAction(action);
-        else target.commitText("\n", 1);
+        target.commitText("\n", 1);
+    }
+
+    private void deleteOnce() {
+        if (getCurrentInputConnection() != null) sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL);
+    }
+
+    private void stopDeleting() {
+        deleting = false;
+        main.removeCallbacks(repeatDelete);
     }
 
     private void openSettings() {
