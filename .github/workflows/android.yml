@@ -5,12 +5,11 @@ on:
     paths: ["android/**", ".github/workflows/android.yml"]
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
   debug-apk:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v5
@@ -30,3 +29,24 @@ jobs:
         with:
           name: gemini-dictation-keyboard-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+  publish-test-apk:
+    if: github.ref == 'refs/heads/codex/android-keyboard'
+    needs: debug-apk
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: gemini-dictation-keyboard-debug
+      - name: Publish directly downloadable test APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "android-test-${GITHUB_RUN_NUMBER}" app-debug.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Android 语音输入法测试版 #${GITHUB_RUN_NUMBER}" \
+            --notes "可直接下载 app-debug.apk 安装。此版本已通过自动编译，尚未在实体手机上验证；用自己的 Gemini API Key，词库只授权所选的 Drive 文件。" \
+            --prerelease

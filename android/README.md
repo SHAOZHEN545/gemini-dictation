@@ -4,7 +4,7 @@
 
 ## 构建与安装
 
-推送本目录后，GitHub Actions 的 **Build Android keyboard** 会构建可安装的调试 APK，并在该次运行的 Artifacts 中提供 `gemini-dictation-keyboard-debug`。这个 APK 用于个人测试；尚未制作正式签名版本，也尚未在实体手机上验证。
+推送此测试分支后，GitHub Actions 的 **Build Android keyboard** 会构建可安装的调试 APK，并把 `app-debug.apk` 作为 GitHub 预发布版本的单独文件提供。手机可以直接点击 APK 下载，不需要解压。这个 APK 用于个人测试；尚未制作正式签名版本，也尚未在实体手机上验证。
 
 若在本机开发，安装 Android SDK 35、JDK 17 和 Gradle 8.9，在 `android/` 运行 `gradle :app:assembleDebug`。也可以先运行 `gradle :wrapper --gradle-version 8.9` 生成 Gradle Wrapper，再用 Android Studio 打开项目。项目使用 Android Gradle Plugin 8.7.0。APK 在 `app/build/outputs/apk/debug/`。
 
