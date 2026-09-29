@@ -108,10 +108,26 @@
         </div>
         <input id="vocabulary-filter" type="search" placeholder="筛选词条" />
         <ul id="vocabulary-list"></ul>
+        <details class="drive-settings">
+          <summary>连接 Google Drive 词库</summary>
+          <p class="muted">首次使用需要填入你自己的 Google Cloud 网页 OAuth 客户端 ID、API key 和项目编号。授权只针对通过文件选择器选中的文件。</p>
+          <label for="drive-client-id">网页 OAuth 客户端 ID</label>
+          <input id="drive-client-id" type="text" placeholder="…apps.googleusercontent.com" spellcheck="false" />
+          <label for="drive-api-key">Google Picker API key</label>
+          <input id="drive-api-key" type="text" spellcheck="false" />
+          <label for="drive-project-number">Google Cloud 项目编号</label>
+          <input id="drive-project-number" type="text" inputmode="numeric" spellcheck="false" />
+          <div class="row wrap">
+            <button type="button" id="drive-pick">选择 Drive 词库</button>
+            <button type="button" id="drive-refresh">重新读取</button>
+            <button type="button" id="drive-disconnect">改用本设备词库</button>
+          </div>
+          <p class="muted" id="drive-status">尚未连接 Drive 文件</p>
+        </details>
         <label for="vocabulary-editor">编辑词库（每行一个词条）</label>
         <textarea id="vocabulary-editor" rows="8" spellcheck="false"></textarea>
-        <button type="button" id="save-vocabulary">保存到本设备</button>
-        <p class="muted">个人词库只保存在这个浏览器；清除网站数据会删除它。桌面版目前使用本机的 config/vocabulary.txt。</p>
+        <button type="button" id="save-vocabulary">保存词库</button>
+        <p class="muted">未连接 Drive 时，词库只保存在当前浏览器。连接后，请先重新读取云端文件再录音或编辑。</p>
       </form>
     </dialog>
 

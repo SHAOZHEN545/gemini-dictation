@@ -4,7 +4,7 @@
 
 ## 构建与安装
 
-推送此测试分支后，GitHub Actions 的 **Build Android keyboard** 会构建可安装的调试 APK，并把 `app-debug.apk` 作为 GitHub 预发布版本的单独文件提供。手机可以直接点击 APK 下载，不需要解压。这个 APK 用于个人测试；尚未制作正式签名版本，也尚未在实体手机上验证。
+推送 Android 改动到 `main` 后，GitHub Actions 的 **Build Android keyboard** 会构建可安装的调试 APK，并把 `app-debug.apk` 作为 GitHub 预发布版本的单独文件提供。手机可以直接点击 APK 下载，不需要解压。这个 APK 用于个人测试；尚未制作正式签名版本，也尚未在实体手机上验证。
 
 若在本机开发，安装 Android SDK 35、JDK 17 和 Gradle 8.9，在 `android/` 运行 `gradle :app:assembleDebug`。也可以先运行 `gradle :wrapper --gradle-version 8.9` 生成 Gradle Wrapper，再用 Android Studio 打开项目。项目使用 Android Gradle Plugin 8.7.0。APK 在 `app/build/outputs/apk/debug/`。
 
@@ -17,4 +17,4 @@
 
 录音和转写文字不写入手机文件。词库只通过你选中的文件读写；如果 Drive 暂时不可用，转写会显示读取失败，重新联网后再试。当前语音模式固定为 `VERBATIM`，单段最长 8 分 30 秒。
 
-网页版和 Windows 桌面版尚未接入这份 Drive 文件；网页版目前仍使用各浏览器的本机词库。网页接入相同文件需要另外配置 Web OAuth 与文件选择流程。
+网页版可通过 Google 授权和 Drive 文件选择器读取同一份文件；需要先按根目录 README 配置 Google Cloud 网页凭据。Windows 桌面版可以选择 Google Drive 桌面版同步到电脑的这份 `.txt` 文件。

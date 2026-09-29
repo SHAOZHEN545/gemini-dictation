@@ -42,9 +42,9 @@
 
 如果已有 `.env`，界面会显示“已从本机读取”；成功转写后才显示“本次转写已成功验证”。
 也可以在界面中粘贴新 key 并点击“保存 Key”。点击“查看 / 编辑词库”可以检查并修改
-`config/vocabulary.txt`：词条按首字母竖向排列，输入新词时会即时筛选并提示是否重复
+当前选中的 `.txt` 词库文件：词条按首字母竖向排列，输入新词时会即时筛选并提示是否重复
 （不区分大小写），双击可修改，选中后按 Delete 删除。转写时，音频和个人词库中的词条会发送给 Gemini。
-词库文件仅保存在本机，不会再随网站发布。
+点击“选择词库文件”可以改用 Google Drive 桌面版同步到电脑的那份 `.txt` 文件。保存前会检查文件是否被其他设备改过；每次开始录音都会重新读取。桌面版使用 Drive 桌面版的同步文件路径，需在电脑上安装并登录 Google Drive 桌面版。词库文件不会随网站发布。
 麦克风列表只显示当前可打开的设备，并将重复的驱动入口合并。
 界面默认选择 `VERBATIM`，因为它会保留口述中的纠正；需要更整洁的文字时可切换到 `SMART`。
 Live 单次会话的官方上限为 10 分钟，界面把录音限制在 8 分 30 秒并自动停止，给连接和
@@ -56,9 +56,16 @@ Live 单次会话的官方上限为 10 分钟，界面把录音限制在 8 分 3
 
 `web/` 是同一套流程的网页版，不需要安装：先在设备上录音，结束后整段交给 Live 转写，
 可以连续录多段，排队、限流重试和桌面版一样。网页是纯静态文件，推送到 `main` 后由
-GitHub Actions 发布到 GitHub Pages。点击“查看 / 编辑词库”可在网页编辑个人词库，
-它只保存在当前浏览器；此前网页版缓存的词条会在首次打开新版时迁移到本机词库。
-桌面版仍使用本机的 `config/vocabulary.txt`，目前两者不会自动同步。
+GitHub Actions 发布到 GitHub Pages。点击“查看 / 编辑词库”可在网页编辑个人词库。未连接 Google Drive 时，词库保存在当前浏览器；此前网页版缓存的词条会在首次打开新版时迁移到本机词库。连接 Drive 后，网页会在每次录音或导入音频前读取所选云端 `.txt` 文件，并可把编辑结果保存回同一文件。浏览器每次重新打开后需要重新授权；授权失败时不会用旧词库静默转写。
+
+### 网页连接 Google Drive 词库
+
+1. 在 [Google Cloud Console](https://console.cloud.google.com/) 建立项目，启用 **Google Drive API** 和 **Google Picker API**，配置 OAuth 同意屏幕；如果应用仍处于测试状态，把自己的 Google 账号加入测试用户。
+2. 建立 **Web application** OAuth 客户端，把网页的来源（例如 `https://<用户名>.github.io`，本地预览还需 `http://localhost:8765`）加入 Authorized JavaScript origins。建立 API key，并记录 Cloud **项目编号**。若限制 API key 的网站来源，按 Google Picker 文档同时允许网页来源和 `https://docs.google.com/*`；若限制 API，允许 Picker API 和 Drive API。
+3. 打开网页的“查看 / 编辑词库 → 连接 Google Drive 词库”，填入客户端 ID、API key 和项目编号，点击“选择 Drive 词库”，登录后选中安卓使用的同一份 `.txt` 文件。授权范围是 `drive.file`。这些公开的网页配置保存在当前浏览器；访问令牌只放在页面内存中，不上传到本站服务器。
+4. 如已有浏览器本地词库，先把词条复制到 Drive 文件里，再切换。切换不会自动合并两份词库。保存时会先对比云端文件，发现其他设备改过会要求重新读取，避免直接覆盖。Google Drive API 的读取与写入不是一个原子事务，极短时间内的同时写入仍可能冲突。
+
+Google 官方说明：[网页授权](https://developers.google.com/identity/oauth2/web/guides/use-token-model)、[Google Picker](https://developers.google.com/workspace/drive/picker/guides/web-picker)、[Drive 文件更新](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/update)。
 
 - **API key**：网页代码里没有 key。每台设备第一次打开时从 Bitwarden 粘贴一次，只存在
   那个浏览器的本地存储里；音频从设备直接发给 Google，中间没有别的服务器。
@@ -88,7 +95,7 @@ detection supports Chinese-English code switching.
 - The API key is read from `GEMINI_API_KEY`, optionally via an ignored `.env` file.
 - `transcripts/` and `recordings/` are ignored by Git.
 - `config/vocabulary.txt` is ignored by Git and no longer included in the web deployment.
-- The web vocabulary is stored locally in each browser. Earlier commits and deployments may still contain the old vocabulary; removing it from the current site does not erase history or caches.
+- The web vocabulary is stored locally in each browser unless a Drive file is selected. Earlier commits and deployments may still contain the old vocabulary; removing it from the current site does not erase Git history or caches.
 - No API key, audio recording, or transcript is included in source control.
 
 ## Setup (Windows PowerShell)

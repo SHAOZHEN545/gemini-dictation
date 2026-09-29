@@ -348,6 +348,25 @@ dialog form {
   break-inside: avoid;
 }
 
+.drive-settings {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.drive-settings label {
+  display: block;
+  margin-top: 8px;
+}
+
+.drive-settings .row {
+  margin-top: 10px;
+}
+
+.drive-settings p {
+  margin: 8px 0;
+}
+
 #vocabulary-editor {
   max-height: 28dvh;
   resize: vertical;

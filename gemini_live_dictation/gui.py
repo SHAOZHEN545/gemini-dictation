@@ -19,13 +19,14 @@ import sounddevice as sd
 from dotenv import dotenv_values, set_key
 from google import genai
 from google.genai import types
-from PySide6.QtCore import QObject, QRectF, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QRectF, QSettings, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QColor, QFont, QFontDatabase, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QInputDialog,
@@ -476,7 +477,8 @@ class VocabularyDialog(QDialog):
     def __init__(self, parent: QWidget | None, path: Path) -> None:
         super().__init__(parent)
         self.path = path
-        lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+        self.original_text = path.read_text(encoding="utf-8") if path.is_file() else None
+        lines = self.original_text.splitlines() if self.original_text is not None else []
         self.comments = [line for line in lines if line.lstrip().startswith("#")]
         terms = (line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#"))
         self.terms = sorted(dict.fromkeys(terms), key=vocabulary_sort_key)
@@ -593,6 +595,10 @@ class VocabularyDialog(QDialog):
             QMessageBox.warning(self, "词库太长", "Gemini 最多接受 1000 个不同的词条。")
             return
         try:
+            current_text = self.path.read_text(encoding="utf-8") if self.path.is_file() else None
+            if current_text != self.original_text:
+                QMessageBox.warning(self, "词库已更改", "词库文件已被其他设备或程序修改。请关闭并重新打开词库后再编辑。")
+                return
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text("\n".join(self.comments + self.terms) + "\n", encoding="utf-8")
         except OSError as error:
@@ -604,6 +610,8 @@ class VocabularyDialog(QDialog):
 class DictationWindow(QWidget):
     def __init__(self) -> None:
         super().__init__()
+        saved_path = QSettings("Gemini Dictation", "Gemini Dictation").value("vocabulary_path", "")
+        self.vocabulary_path = Path(saved_path) if saved_path else VOCABULARY_PATH
         self.recorder: LocalRecorder | None = None
         self.jobs: list[TranscriptionJob] = []
         self.job_items: dict[int, QListWidgetItem] = {}
@@ -758,6 +766,9 @@ class DictationWindow(QWidget):
         self.vocabulary_button = QPushButton("查看 / 编辑词库")
         self.vocabulary_button.clicked.connect(self._show_vocabulary)
         vocab_row.addWidget(self.vocabulary_button)
+        choose_vocabulary = QPushButton("选择词库文件")
+        choose_vocabulary.clicked.connect(self._choose_vocabulary)
+        vocab_row.addWidget(choose_vocabulary)
         settings_layout.addLayout(vocab_row)
         root.addWidget(settings)
         root.addSpacing(8)
@@ -915,8 +926,10 @@ class DictationWindow(QWidget):
         else:
             self.key_status.setText("API key：尚未设置")
         try:
-            count = len(read_vocabulary(VOCABULARY_PATH)) if VOCABULARY_PATH.is_file() else 0
-            self.vocabulary_status.setText(f"个人词库：{count} 项（仅保存在本机 config/vocabulary.txt）")
+            if self.vocabulary_path != VOCABULARY_PATH and not self.vocabulary_path.is_file():
+                raise FileNotFoundError(f"找不到词库文件：{self.vocabulary_path}")
+            count = len(read_vocabulary(self.vocabulary_path)) if self.vocabulary_path.is_file() else 0
+            self.vocabulary_status.setText(f"个人词库：{count} 项 · {self.vocabulary_path}")
         except Exception as error:
             self.vocabulary_status.setText(f"个人词库需要检查：{error}")
 
@@ -937,9 +950,23 @@ class DictationWindow(QWidget):
         self._dispatch_jobs()
 
     def _show_vocabulary(self) -> None:
-        if VocabularyDialog(self, VOCABULARY_PATH).exec():
+        try:
+            dialog = VocabularyDialog(self, self.vocabulary_path)
+        except OSError as error:
+            QMessageBox.critical(self, "无法读取词库", str(error))
+            return
+        if dialog.exec():
             self._refresh_key_status()
             self.status_label.setText("个人词库已更新，下次录音生效")
+
+    def _choose_vocabulary(self) -> None:
+        selected, _ = QFileDialog.getOpenFileName(
+            self, "选择 Google Drive 桌面版同步的词库文本文件", str(self.vocabulary_path.parent), "文本文件 (*.txt);;所有文件 (*)"
+        )
+        if selected:
+            self.vocabulary_path = Path(selected)
+            QSettings("Gemini Dictation", "Gemini Dictation").setValue("vocabulary_path", selected)
+            self._refresh_key_status()
 
     def _toggle_recording(self) -> None:
         if self.recorder is not None:
@@ -971,7 +998,9 @@ class DictationWindow(QWidget):
             self.key_input.setFocus()
             return
         try:
-            vocabulary = read_vocabulary(VOCABULARY_PATH) if VOCABULARY_PATH.is_file() else []
+            if self.vocabulary_path != VOCABULARY_PATH and not self.vocabulary_path.is_file():
+                raise FileNotFoundError(f"找不到词库文件：{self.vocabulary_path}")
+            vocabulary = read_vocabulary(self.vocabulary_path) if self.vocabulary_path.is_file() else []
         except (OSError, ValueError) as error:
             QMessageBox.critical(self, "个人词库错误", str(error))
             return

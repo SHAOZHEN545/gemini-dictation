@@ -1,6 +1,7 @@
 import { LIVE_RECORDING_SECONDS, SAMPLE_RATE, clockText, decodeToPcm, transcribeLive } from "./live.js";
 import { LocalRecorder, listMicrophones, primeAudio } from "./recorder.js";
 import { deleteJob, loadJobs, saveJob } from "./store.js";
+import { DriveVocabulary } from "./drive-vocabulary.js";
 
 // Same scheduling rules as the desktop app (see MAX_PARALLEL_JOBS in gui.py).
 const MAX_PARALLEL_JOBS = 3;
@@ -42,6 +43,13 @@ const ui = {
   vocabularyList: $("vocabulary-list"),
   vocabularyEditor: $("vocabulary-editor"),
   saveVocabulary: $("save-vocabulary"),
+  driveClientId: $("drive-client-id"),
+  driveApiKey: $("drive-api-key"),
+  driveProjectNumber: $("drive-project-number"),
+  drivePick: $("drive-pick"),
+  driveRefresh: $("drive-refresh"),
+  driveDisconnect: $("drive-disconnect"),
+  driveStatus: $("drive-status"),
   toast: $("toast"),
 };
 
@@ -49,6 +57,7 @@ let jobs = []; // Recording order; the list shows the newest first.
 let nextJobNumber = 1;
 let cooldownUntil = 0; // After a quota refusal, queued jobs wait instead of piling on.
 let vocabulary = [];
+const drive = new DriveVocabulary();
 let keyVerified = false;
 let recorder = null;
 let session = null; // Mode and vocabulary captured when a recording starts.
@@ -129,6 +138,57 @@ function loadVocabulary() {
     ui.vocabularyStatus.textContent = `个人词库需要检查：${error.message}`;
   }
   refreshSettingsSummary();
+}
+
+function driveConfig() {
+  const clientId = ui.driveClientId.value.trim();
+  const apiKey = ui.driveApiKey.value.trim();
+  const projectNumber = ui.driveProjectNumber.value.trim();
+  if (!clientId || !apiKey || !/^\d+$/.test(projectNumber)) {
+    throw new Error("请填写网页 OAuth 客户端 ID、Picker API key 和数字项目编号");
+  }
+  localStorage.setItem("drive-client-id", clientId);
+  localStorage.setItem("drive-api-key", apiKey);
+  localStorage.setItem("drive-project-number", projectNumber);
+  return { clientId, apiKey, projectNumber };
+}
+
+function showDriveState() {
+  if (drive.fileId) {
+    const ready = drive.loadedText !== null;
+    ui.driveStatus.textContent = `${drive.fileName} · ${ready ? "已读取" : "需要重新读取"}`;
+    ui.vocabularyStatus.textContent = ready
+      ? `个人词库：${vocabulary.length} 项（Google Drive：${drive.fileName}）`
+      : `个人词库：Drive 文件 ${drive.fileName} 尚未读取`;
+    ui.saveVocabulary.textContent = "保存到 Google Drive";
+  } else {
+    ui.driveStatus.textContent = "尚未连接 Drive 文件";
+    ui.vocabularyStatus.textContent = `个人词库：${vocabulary.length} 项（仅本设备）`;
+    ui.saveVocabulary.textContent = "保存到本设备";
+  }
+  refreshSettingsSummary();
+}
+
+async function readDriveVocabulary() {
+  const { clientId } = driveConfig();
+  const text = await drive.read(clientId);
+  vocabulary = parseVocabulary(text);
+  ui.vocabularyEditor.value = text;
+  renderVocabulary();
+  showDriveState();
+}
+
+async function freshVocabulary() {
+  if (!drive.fileId) return true;
+  try {
+    await readDriveVocabulary();
+    return true;
+  } catch (error) {
+    drive.loadedText = null;
+    showDriveState();
+    setStatus(`无法读取 Drive 词库：${error.message}`);
+    return false;
+  }
 }
 
 function vocabularySortKey(term) {
@@ -245,6 +305,7 @@ async function startRecording() {
     setStatus("请先粘贴并保存 API key");
     return false;
   }
+  if (!(await freshVocabulary())) return false;
   const take = new LocalRecorder(ui.microphone.value);
   ui.record.disabled = true;
   try {
@@ -327,6 +388,7 @@ function tick() {
 }
 
 async function importFiles(files) {
+  if (!(await freshVocabulary())) return;
   for (const file of files) {
     try {
       const pcm = await decodeToPcm(file);
@@ -601,24 +663,54 @@ ui.clearDone.addEventListener("click", () => {
 
 ui.showVocabulary.addEventListener("click", () => {
   ui.vocabularyFilter.value = "";
-  ui.vocabularyEditor.value = vocabulary.join("\n");
+  ui.vocabularyEditor.value = drive.fileId ? (drive.loadedText ?? "") : vocabulary.join("\n");
   renderVocabulary();
   ui.vocabularyDialog.showModal();
 });
 ui.vocabularyFilter.addEventListener("input", renderVocabulary);
-ui.saveVocabulary.addEventListener("click", () => {
+ui.saveVocabulary.addEventListener("click", async () => {
   try {
     const terms = parseVocabulary(ui.vocabularyEditor.value);
-    localStorage.setItem(VOCABULARY_STORAGE, terms.join("\n"));
+    if (drive.fileId) {
+      const { clientId } = driveConfig();
+      await drive.save(clientId, ui.vocabularyEditor.value);
+    } else {
+      localStorage.setItem(VOCABULARY_STORAGE, terms.join("\n"));
+    }
     vocabulary = terms;
-    ui.vocabularyEditor.value = terms.join("\n");
-    ui.vocabularyStatus.textContent = `个人词库：${terms.length} 项（仅本设备）`;
-    refreshSettingsSummary();
+    if (!drive.fileId) ui.vocabularyEditor.value = terms.join("\n");
+    showDriveState();
     renderVocabulary();
-    toast(`已保存 ${terms.length} 个词条`);
+    toast(`已保存 ${terms.length} 个词条${drive.fileId ? "到 Drive" : "到本设备"}`);
   } catch (error) {
     toast(error.message);
+    showDriveState();
   }
+});
+
+ui.drivePick.addEventListener("click", async () => {
+  ui.drivePick.disabled = true;
+  try {
+    if (await drive.pick(driveConfig())) await readDriveVocabulary();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    ui.drivePick.disabled = false;
+    showDriveState();
+  }
+});
+ui.driveRefresh.addEventListener("click", async () => {
+  ui.driveRefresh.disabled = true;
+  try { await readDriveVocabulary(); }
+  catch (error) { drive.loadedText = null; toast(error.message); }
+  finally { ui.driveRefresh.disabled = false; showDriveState(); }
+});
+ui.driveDisconnect.addEventListener("click", () => {
+  drive.disconnect();
+  loadVocabulary();
+  ui.vocabularyEditor.value = vocabulary.join("\n");
+  renderVocabulary();
+  showDriveState();
 });
 
 window.addEventListener("beforeunload", (event) => {
@@ -652,6 +744,11 @@ ui.settings.open = !apiKey();
 drawMeter();
 refreshMicrophones();
 loadVocabulary();
+ui.driveClientId.value = localStorage.getItem("drive-client-id") || "";
+ui.driveApiKey.value = localStorage.getItem("drive-api-key") || "";
+ui.driveProjectNumber.value = localStorage.getItem("drive-project-number") || "";
+if (drive.fileId) vocabulary = [];
+showDriveState();
 try {
   await restoreJobs();
 } catch (error) {
