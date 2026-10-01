@@ -24,3 +24,6 @@ gemini-live-gui = "gemini_live_dictation.gui:main"
 
 [tool.setuptools.packages.find]
 include = ["gemini_live_dictation*"]
+
+[tool.setuptools.package-data]
+gemini_live_dictation = ["assets/*.png", "assets/*.ico"]

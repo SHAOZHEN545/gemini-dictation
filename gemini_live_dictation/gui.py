@@ -20,7 +20,7 @@ from dotenv import dotenv_values, set_key
 from google import genai
 from google.genai import types
 from PySide6.QtCore import QObject, QRectF, QSettings, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QColor, QFont, QFontDatabase, QKeySequence, QPainter, QShortcut
+from PySide6.QtGui import QCloseEvent, QColor, QFont, QFontDatabase, QIcon, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -47,6 +47,7 @@ from .cli import BLOCKSIZE, MODEL as LIVE_MODEL, SAMPLE_RATE, decode_file_to_pcm
 
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
+APP_ICON_PATH = Path(__file__).resolve().parent / "assets" / "app-icon.ico"
 ENV_PATH = PROJECT_DIR / ".env"
 VOCABULARY_PATH = PROJECT_DIR / "config" / "vocabulary.txt"
 TRANSCRIPTS_DIR = PROJECT_DIR / "transcripts"
@@ -622,6 +623,7 @@ class DictationWindow(QWidget):
         self.close_when_finished = False
         self.key_verified = False
         self.setWindowTitle("Gemini Dictation")
+        self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
         self.setMinimumSize(880, 980)
         self.resize(1000, 1020)
         self._build_ui()
@@ -1332,7 +1334,13 @@ class DictationWindow(QWidget):
             event.accept()
 
 def main() -> None:
+    if sys.platform == "win32":
+        # Give the taskbar its own identity instead of grouping with other Python apps.
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("GeminiDictation.Desktop")
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon(str(APP_ICON_PATH)))
     configure_font(app)
     window = DictationWindow()
     window.show()

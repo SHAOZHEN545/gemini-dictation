@@ -11,6 +11,7 @@ $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $runtimeRoot = Join-Path $projectRoot '.runtime'
 $pythonExe = Join-Path $projectRoot '.venv\Scripts\python.exe'
 $pythonwExe = Join-Path $projectRoot '.venv\Scripts\pythonw.exe'
+$appIconPath = Join-Path $projectRoot 'gemini_live_dictation\assets\app-icon.ico'
 $logPath = Join-Path $runtimeRoot 'install.log'
 $form = $null
 $installLock = $null
@@ -103,6 +104,7 @@ try {
         [Windows.Forms.Application]::EnableVisualStyles()
         $form = New-Object Windows.Forms.Form
         $form.Text = '安装 Gemini Dictation'
+        $form.Icon = New-Object Drawing.Icon($appIconPath)
         $form.ClientSize = New-Object Drawing.Size(560, 215)
         $form.StartPosition = 'CenterScreen'
         $form.FormBorderStyle = 'FixedDialog'
@@ -192,6 +194,7 @@ try {
         $shortcut.Arguments = Quote-NativeArgument (Join-Path $projectRoot 'scripts\launch-desktop.pyw')
         $shortcut.WorkingDirectory = $projectRoot
         $shortcut.Description = 'Gemini 语音转写'
+        $shortcut.IconLocation = $appIconPath + ',0'
         $shortcut.Save()
     }
     Update-Progress '安装完成。首次打开后，请保存 API Key 并选择词库文件。'

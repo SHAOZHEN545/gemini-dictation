@@ -17,6 +17,10 @@ Windows 10 / 11 的 Intel / AMD 64 位电脑可以直接使用：
 
 手机上请按下方 Android 说明安装 APK；仅在电脑下载仓库不会安装手机输入法。网页版也可直接在浏览器使用，无需安装桌面程序。
 
+Windows 窗口、任务栏、安装窗口和桌面快捷方式，以及 Android 应用和网页主屏幕图标统一使用可达鸭。更新后重启桌面程序，并再次运行 `Install Dictation.cmd` 刷新桌面快捷方式；如任务栏固定图标仍显示旧图标，取消固定后从新版程序重新固定。Android 需安装新版 APK；网页需发布新版，已添加到手机主屏幕的旧图标如未刷新，可删除快捷方式后重新添加。
+
+原始图标保存在 `gemini_live_dictation/assets/app-icon.png`，Windows ICO、Android 各密度与自适应图标、网页图标均由 `scripts/generate-icons.py` 生成。修改原图后，在装有 Pillow 的开发环境运行该脚本即可更新；应用运行时不需要 Pillow。
+
 ## Android 语音输入法（测试版）
 
 `android/` 中新增 Android 系统输入法：可以在三星手机的其他 App 输入框里点击麦克风口述，转写结果直接输入。词库通过 Android 系统文件选择器授权读写 Google Drive 中的一份 `.txt` 文件；Gemini API Key 从 Bitwarden 粘贴后加密保存在手机本地。安装和使用步骤见 [Android 说明](android/README.md)。
