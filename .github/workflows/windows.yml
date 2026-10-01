@@ -1,0 +1,53 @@
+name: Check Windows double-click installation
+
+on:
+  push:
+    paths:
+      - "gemini_live_dictation/**"
+      - "scripts/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "*Dictation.cmd"
+      - ".github/workflows/windows.yml"
+  pull_request:
+    paths:
+      - "gemini_live_dictation/**"
+      - "scripts/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "*Dictation.cmd"
+      - ".github/workflows/windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: "项目 with spaces"
+      - name: Install from a clean checkout without preinstalled Python
+        shell: powershell
+        working-directory: "项目 with spaces"
+        run: ./scripts/install-windows.ps1 -Headless -NoLaunch -NoShortcuts
+      - name: Confirm private files survive repeat installation
+        shell: powershell
+        working-directory: "项目 with spaces"
+        run: |
+          Set-Content .env 'GEMINI_API_KEY=installation-test-placeholder'
+          Set-Content config/vocabulary.txt 'installation-test-term'
+          ./scripts/install-windows.ps1 -Headless -NoLaunch -NoShortcuts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-Content .env) -ne 'GEMINI_API_KEY=installation-test-placeholder') { throw 'API key file was changed' }
+          if ((Get-Content config/vocabulary.txt) -ne 'installation-test-term') { throw 'Vocabulary file was changed' }
+      - name: Run desktop and Drive vocabulary checks
+        shell: powershell
+        working-directory: "项目 with spaces"
+        run: |
+          ./.venv/Scripts/python.exe -m unittest discover -s tests -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tests/drive_vocabulary.test.mjs
+          exit $LASTEXITCODE

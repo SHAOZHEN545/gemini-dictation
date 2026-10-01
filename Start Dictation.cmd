@@ -2,8 +2,7 @@
 setlocal
 cd /d "%~dp0"
 if not exist ".venv\Scripts\pythonw.exe" (
-    echo The project environment is missing. See README.md for first-time setup.
-    pause
-    exit /b 1
+    call "%~dp0Install Dictation.cmd"
+    exit /b 0
 )
-start "" ".venv\Scripts\pythonw.exe" -m gemini_live_dictation.gui
+start "" ".venv\Scripts\pythonw.exe" "%~dp0scripts\launch-desktop.pyw"

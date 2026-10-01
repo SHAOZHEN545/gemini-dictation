@@ -1,5 +1,22 @@
 # Gemini Live Dictation
 
+## 新电脑：双击安装与启动
+
+Windows 10 / 11 的 Intel / AMD 64 位电脑可以直接使用：
+
+1. 从 GitHub 下载仓库 ZIP，**先完整解压**到一个准备长期保留的文件夹；如果已经克隆仓库，直接使用该文件夹。
+2. 双击 **`Install Dictation.cmd`**。安装窗口会显示进度，自动下载独立的 Python 运行环境、安装桌面和音频组件、创建桌面快捷方式，并打开程序。首次安装需要联网，可能需要几分钟；无需输入命令、预装 Python 或使用管理员权限。
+3. 在程序里粘贴自己的 **Gemini API Key**，点击“保存 Key”。新电脑需要重新填写，GitHub 仓库不会携带其他电脑的 Key。
+4. 如果要使用云端词库，先安装并登录 **Google Drive 桌面版**，再点程序里的“选择词库文件”，选择同步到这台电脑的那份 `.txt`。也可以先使用本机词库开始录音。
+
+以后双击桌面的 **Gemini Dictation** 或项目里的 **`Start Dictation.cmd`** 即可。首次直接点“Start”时，如果还没有运行环境，也会打开安装窗口。更新仓库后，可以再次双击“Install”更新依赖；已有 Key、词库、录音和转写文件会保留。
+
+请保留项目文件夹：快捷方式指向其中的程序，移动文件夹后需要在新位置重新双击安装。安装工具、下载缓存放在 `.runtime/`，运行环境放在 `.venv/`，均不会提交到 Git。安装失败会显示原因，并保存 `.runtime/install.log`；启动时发生程序错误会显示提示并保存 `.runtime/launch-error.log`。
+
+安装流程使用固定版本、校验 SHA-256 的 [uv 官方发布文件](https://github.com/astral-sh/uv/releases/tag/0.12.19)，由 uv 下载本项目独立使用的 Python，不修改系统 PATH。运行环境管理方式见 [uv 文档](https://docs.astral.sh/uv/guides/install-python/)。首次安装需能访问 GitHub 和 PyPI。
+
+手机上请按下方 Android 说明安装 APK；仅在电脑下载仓库不会安装手机输入法。网页版也可直接在浏览器使用，无需安装桌面程序。
+
 ## Android 语音输入法（测试版）
 
 `android/` 中新增 Android 系统输入法：可以在三星手机的其他 App 输入框里点击麦克风口述，转写结果直接输入。词库通过 Android 系统文件选择器授权读写 Google Drive 中的一份 `.txt` 文件；Gemini API Key 从 Bitwarden 粘贴后加密保存在手机本地。安装和使用步骤见 [Android 说明](android/README.md)。
@@ -28,7 +45,7 @@
 录音在转写完成前暂存在本机的 `recordings/`；文字写入 `transcripts/` 后，录音自动删除。
 转写失败的录音会保留，以便重试。两个文件夹都被 Git 忽略。
 
-在项目文件夹的 PowerShell 中首次安装桌面版：
+推荐直接按上面的“双击安装与启动”操作。如果已经准备好 Python 虚拟环境，开发时也可以手动安装桌面版：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -e ".[gui]"
@@ -159,6 +176,6 @@ the audio file is never copied into this repository.
 
 ## Next steps
 
-1. Try a short microphone dictation in the desktop app and check the selected input device.
-2. Tune the private vocabulary list for terms that are still misheard.
-3. Consider packaging the desktop app as a Windows executable after the interaction feels right.
+1. 在真实 Windows 电脑上试一段短录音，确认麦克风和转写正常。
+2. 在 Android 实体手机上验证安装、输入法切换、语音输入和 Drive 词库读写。
+3. 调整个人词库，并在多台设备上检查同步效果。
