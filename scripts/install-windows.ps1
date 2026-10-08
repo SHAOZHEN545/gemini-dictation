@@ -41,6 +41,69 @@ function Quote-NativeArgument([string]$Value) {
     return '"' + $escaped + '"'
 }
 
+# WScript.Shell converts shortcut paths to the ANSI code page, which breaks
+# desktops like "OneDrive\桌面" on English-locale systems. IShellLinkW is Unicode.
+function Save-Shortcut([string]$Path, [string]$Target, [string]$Arguments, [string]$WorkingDirectory, [string]$Description, [string]$IconPath) {
+    if (-not ('GeminiDictation.ShellShortcut' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Text;
+
+namespace GeminiDictation {
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+    class ShellLink { }
+
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("000214F9-0000-0000-C000-000000000046")]
+    interface IShellLinkW {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cch, IntPtr pfd, uint fFlags);
+        void GetIDList(out IntPtr ppidl);
+        void SetIDList(IntPtr pidl);
+        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cch);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cch);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cch);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+        void GetHotkey(out short pwHotkey);
+        void SetHotkey(short wHotkey);
+        void GetShowCmd(out int piShowCmd);
+        void SetShowCmd(int iShowCmd);
+        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cch, out int piIcon);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
+        void Resolve(IntPtr hwnd, uint fFlags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+    }
+
+    public static class ShellShortcut {
+        public static void Save(string path, string target, string arguments, string workingDirectory, string description, string iconPath) {
+            IShellLinkW link = (IShellLinkW)new ShellLink();
+            try {
+                link.SetPath(target);
+                link.SetArguments(arguments);
+                link.SetWorkingDirectory(workingDirectory);
+                link.SetDescription(description);
+                link.SetIconLocation(iconPath, 0);
+                ((IPersistFile)link).Save(path, true);
+            }
+            finally {
+                Marshal.ReleaseComObject(link);
+            }
+        }
+    }
+}
+'@
+    }
+    try {
+        [GeminiDictation.ShellShortcut]::Save($Path, $Target, $Arguments, $WorkingDirectory, $Description, $IconPath)
+    }
+    catch {
+        throw "无法创建桌面快捷方式：$Path`r`n$($_.Exception.GetBaseException().Message)"
+    }
+}
+
 function Invoke-InstallerProcess([string]$Executable, [string[]]$Arguments) {
     $info = New-Object Diagnostics.ProcessStartInfo
     $info.FileName = $Executable
@@ -188,14 +251,9 @@ try {
     }
     if (-not $NoShortcuts) {
         $desktop = [Environment]::GetFolderPath('DesktopDirectory')
-        $shell = New-Object -ComObject WScript.Shell
-        $shortcut = $shell.CreateShortcut((Join-Path $desktop 'Gemini Dictation.lnk'))
-        $shortcut.TargetPath = $pythonwExe
-        $shortcut.Arguments = Quote-NativeArgument (Join-Path $projectRoot 'scripts\launch-desktop.pyw')
-        $shortcut.WorkingDirectory = $projectRoot
-        $shortcut.Description = 'Gemini 语音转写'
-        $shortcut.IconLocation = $appIconPath + ',0'
-        $shortcut.Save()
+        Save-Shortcut -Path (Join-Path $desktop 'Gemini Dictation.lnk') -Target $pythonwExe `
+            -Arguments (Quote-NativeArgument (Join-Path $projectRoot 'scripts\launch-desktop.pyw')) `
+            -WorkingDirectory $projectRoot -Description 'Gemini 语音转写' -IconPath $appIconPath
     }
     Update-Progress '安装完成。首次打开后，请保存 API Key 并选择词库文件。'
     if (-not $NoLaunch) {
