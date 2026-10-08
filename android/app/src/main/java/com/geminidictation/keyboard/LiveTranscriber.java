@@ -20,6 +20,11 @@ import okhttp3.WebSocketListener;
 import okio.ByteString;
 
 final class LiveTranscriber {
+    interface ProgressListener {
+        // Percentage measures audio submitted to the socket, not Gemini's processing progress.
+        void onProgress(String stage, int percent);
+    }
+
     private static final String ENDPOINT =
             "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
     private static final String MODEL = "models/gemini-3.5-transcribe-live";
@@ -27,10 +32,12 @@ final class LiveTranscriber {
 
     private LiveTranscriber() { }
 
-    static String transcribe(byte[] pcm, String apiKey, String mode, List<String> vocabulary) throws Exception {
+    static String transcribe(byte[] pcm, String apiKey, String mode, List<String> vocabulary,
+                             ProgressListener progress) throws Exception {
         if (pcm.length == 0) throw new IllegalArgumentException("没有录到声音");
         double seconds = pcm.length / (PcmRecorder.SAMPLE_RATE * 2.0);
         if (seconds > PcmRecorder.MAX_SECONDS + 2) throw new IllegalArgumentException("录音太长，请分段录制");
+        progress.onProgress("正在连接 Gemini", -1);
 
         CountDownLatch setup = new CountDownLatch(1);
         CountDownLatch done = new CountDownLatch(1);
@@ -100,6 +107,8 @@ final class LiveTranscriber {
             if (failure.get() != null) throw new IllegalStateException(failure.get());
             send(socket, "{\"realtimeInput\":{\"activityStart\":{}}}");
             long started = SystemClock.elapsedRealtime();
+            int lastPercent = -1;
+            progress.onProgress("发送音频 · 已提交", 0);
             for (int offset = 0; offset < pcm.length; offset += 3200) {
                 if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
                 if (failure.get() != null) throw new IllegalStateException(failure.get());
@@ -113,10 +122,28 @@ final class LiveTranscriber {
                         .put("audio", new JSONObject().put("data", encoded)
                                 .put("mimeType", "audio/pcm;rate=16000")));
                 send(socket, chunk.toString());
+                int percent = (int) ((offset + length) * 100L / pcm.length);
+                if (percent != lastPercent) {
+                    progress.onProgress("发送音频 · 已提交", percent);
+                    lastPercent = percent;
+                }
             }
             send(socket, "{\"realtimeInput\":{\"activityEnd\":{}}}");
             long timeout = (long) ((30 + seconds / 4 * 2) * 1000);
-            done.await(timeout, TimeUnit.MILLISECONDS);
+            long deadline = SystemClock.elapsedRealtime() + timeout;
+            progress.onProgress("正在上传剩余音频", -1);
+            // send() queues messages locally. Only label the next stage as waiting for
+            // Gemini after OkHttp has written that queue to the network.
+            boolean waitingForGemini = false;
+            while (done.getCount() != 0) {
+                if (!waitingForGemini && socket.queueSize() == 0) {
+                    waitingForGemini = true;
+                    progress.onProgress("等待 Gemini 完成转写", -1);
+                }
+                long remaining = deadline - SystemClock.elapsedRealtime();
+                if (remaining <= 0) break;
+                if (done.await(Math.min(remaining, 250), TimeUnit.MILLISECONDS)) break;
+            }
             synchronized (transcript) {
                 String result = transcript.toString().trim();
                 if (!result.isEmpty()) return result;

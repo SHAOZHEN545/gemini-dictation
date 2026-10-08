@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.inputmethodservice.InputMethodService;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -19,9 +20,11 @@ import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -30,6 +33,10 @@ public final class VoiceInputService extends InputMethodService {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private TextView status;
+    private ProgressBar progressBar;
+    private String processingStage;
+    private int processingPercent = -1;
+    private long processingStarted;
     private Button microphone;
     private Button voiceTab;
     private Button editTab;
@@ -44,6 +51,13 @@ public final class VoiceInputService extends InputMethodService {
     private boolean privateField;
     private boolean deleting;
     private boolean suppressDeleteClick;
+    private final Runnable progressTick = new Runnable() {
+        @Override public void run() {
+            if (!busy) return;
+            renderProgress();
+            main.postDelayed(this, 1000);
+        }
+    };
     private final Runnable repeatDelete = new Runnable() {
         @Override public void run() {
             if (!deleting) return;
@@ -62,6 +76,11 @@ public final class VoiceInputService extends InputMethodService {
         status.setTextSize(15);
         status.setText("点击麦克风开始录音");
         body.addView(status);
+        progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        progressBar.setMax(100);
+        progressBar.setVisibility(View.GONE);
+        body.addView(progressBar, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(6)));
         LinearLayout tabs = new LinearLayout(this);
         tabs.setGravity(Gravity.CENTER_VERTICAL);
         body.addView(tabs);
@@ -149,9 +168,7 @@ public final class VoiceInputService extends InputMethodService {
         if (recorder != null) {
             PcmRecorder finished = recorder;
             recorder = null;
-            busy = true;
-            show("录音结束，准备转写…");
-            updateUi();
+            startProcessing("正在结束录音");
             finished.finish();
             return;
         }
@@ -182,28 +199,33 @@ public final class VoiceInputService extends InputMethodService {
         if (capturedSession != editorSession) return;
         recorder = null;
         if (error != null || pcm.length == 0) {
-            busy = false;
+            finishProcessing();
             show(error == null ? "没有录到声音" : error);
             updateUi();
             return;
         }
-        busy = true;
-        show("连接 Gemini 转写中…");
-        updateUi();
+        startProcessing("正在读取词库");
         transcription = worker.submit(() -> {
             String key = "";
             try {
                 key = SecureKeyStore.read(this);
                 if (key.isEmpty()) throw new IllegalStateException("Gemini Key 未设置");
                 List<String> vocabulary = VocabularyStore.parse(VocabularyStore.read(this));
-                String text = LiveTranscriber.transcribe(pcm, key, "VERBATIM", vocabulary);
+                String text = LiveTranscriber.transcribe(pcm, key, "VERBATIM", vocabulary,
+                        (stage, percent) -> main.post(() -> {
+                            if (capturedSession != editorSession || !busy) return;
+                            processingStage = stage;
+                            processingPercent = percent;
+                            renderProgress();
+                        }));
                 main.post(() -> {
                     if (capturedSession != editorSession) return;
-                    busy = false;
+                    String elapsed = elapsedProcessing();
+                    finishProcessing();
                     InputConnection target = getCurrentInputConnection();
                     if (target != null && !privateField) {
                         target.commitText(text, 1);
-                        show("已输入文字 · 点击麦克风可继续");
+                        show("已输入文字 · 耗时 " + elapsed + " · 点击麦克风可继续");
                     } else show("当前输入框已关闭，文字未写入");
                     updateUi();
                 });
@@ -213,7 +235,7 @@ public final class VoiceInputService extends InputMethodService {
                 String displayError = safe;
                 main.post(() -> {
                     if (capturedSession != editorSession) return;
-                    busy = false;
+                    finishProcessing();
                     show("转写失败：" + displayError);
                     updateUi();
                 });
@@ -228,8 +250,39 @@ public final class VoiceInputService extends InputMethodService {
         recorder = null;
         if (transcription != null) transcription.cancel(true);
         transcription = null;
-        busy = false;
+        finishProcessing();
         updateUi();
+    }
+
+    private void startProcessing(String stage) {
+        if (!busy) processingStarted = SystemClock.elapsedRealtime();
+        busy = true;
+        processingStage = stage;
+        processingPercent = -1;
+        main.removeCallbacks(progressTick);
+        renderProgress();
+        main.postDelayed(progressTick, 1000);
+        updateUi();
+    }
+
+    private void finishProcessing() {
+        busy = false;
+        main.removeCallbacks(progressTick);
+        if (progressBar != null) progressBar.setVisibility(View.GONE);
+    }
+
+    private String elapsedProcessing() {
+        return String.format(Locale.CHINA, "%.1f 秒",
+                (SystemClock.elapsedRealtime() - processingStarted) / 1000.0);
+    }
+
+    private void renderProgress() {
+        if (!busy || progressBar == null) return;
+        progressBar.setVisibility(View.VISIBLE);
+        progressBar.setIndeterminate(processingPercent < 0);
+        if (processingPercent >= 0) progressBar.setProgress(processingPercent);
+        show(processingStage + (processingPercent < 0 ? "" : " " + processingPercent + "%")
+                + " · 已等待 " + elapsedProcessing());
     }
 
     private boolean isPrivateField(int inputType) {
@@ -331,6 +384,7 @@ public final class VoiceInputService extends InputMethodService {
         microphone.setEnabled(!busy && !privateField);
         microphone.setText(recorder == null ? "🎙 录音" : "■ 结束");
         if (pasteButton != null) pasteButton.setEnabled(oneTimeCopy != null);
+        if (busy) renderProgress();
     }
     private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + .5f); }
 

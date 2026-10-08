@@ -6,6 +6,7 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.Editable;
@@ -41,6 +42,7 @@ public final class SettingsActivity extends Activity {
     private ArrayAdapter<String> vocabularyAdapter;
     private VocabularyDraft draft = new VocabularyDraft("");
     private Button saveVocabularyButton;
+    private Button addVocabularyButton;
     private boolean dirty;
     private boolean saving;
     private boolean loading;
@@ -98,7 +100,7 @@ public final class SettingsActivity extends Activity {
         button(body, "在 Google Drive 新建词库文件", () -> requestPickFile(true));
         label(body, "添加词条（每次输入一个）", 16);
         termInput = new EditText(this);
-        termInput.setHint("输入词条后点添加或键盘完成键");
+        termInput.setHint("输入词条后点添加并保存或键盘完成键");
         termInput.setSingleLine(true);
         termInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
         termInput.setOnEditorActionListener((view, actionId, event) -> {
@@ -106,7 +108,8 @@ public final class SettingsActivity extends Activity {
             return false;
         });
         body.addView(termInput);
-        button(body, "添加到词库", this::addTerm);
+        addVocabularyButton = button(body, "添加并保存", this::addTerm);
+        label(body, "添加后自动保存到 Drive；修改和删除词条后仍需点“保存修改到 Drive”。", 14);
         filterInput = new EditText(this);
         filterInput.setHint("筛选词条");
         filterInput.setSingleLine(true);
@@ -210,6 +213,7 @@ public final class SettingsActivity extends Activity {
         if (VocabularyStore.selectedUri(this) == null) { message("请先选择 Drive 词库文件"); return; }
         if (loading || saving) return;
         loading = true;
+        addVocabularyButton.setEnabled(false);
         message("正在从 Drive 读取词库…");
         worker.execute(() -> {
             try {
@@ -217,6 +221,7 @@ public final class SettingsActivity extends Activity {
                 VocabularyDraft next = new VocabularyDraft(text);
                 runOnUiThread(() -> {
                     loading = false;
+                    addVocabularyButton.setEnabled(true);
                     draft = next;
                     loadedVocabulary = text;
                     dirty = false;
@@ -226,6 +231,7 @@ public final class SettingsActivity extends Activity {
                 });
             } catch (Exception error) { runOnUiThread(() -> {
                 loading = false;
+                addVocabularyButton.setEnabled(true);
                 message("读取失败：" + error.getMessage());
             }); }
         });
@@ -238,6 +244,7 @@ public final class SettingsActivity extends Activity {
             draft.add(termInput.getText().toString());
             termInput.setText("");
             markDirty();
+            saveVocabulary();
         } catch (IllegalArgumentException error) {
             termInput.setError(error.getMessage());
         }
@@ -301,26 +308,30 @@ public final class SettingsActivity extends Activity {
         if (saving || loading) return;
         String text = draft.serialize();
         String expected = loadedVocabulary;
+        Uri uri = VocabularyStore.selectedUri(this);
         if (expected == null) { message("请先读取词库，再保存修改"); return; }
         if (!dirty) { message("词库没有待保存的修改"); return; }
         message("正在保存到 Drive…");
         saving = true;
+        addVocabularyButton.setEnabled(false);
         saveVocabularyButton.setEnabled(false);
         worker.execute(() -> {
             try {
-                if (!VocabularyStore.read(this).equals(expected))
+                if (!VocabularyStore.read(this, uri).equals(expected))
                     throw new IOException("云端词库已被其他设备修改，请先重新读取，以免覆盖新词条");
-                VocabularyStore.write(this, text);
+                VocabularyStore.write(this, uri, text);
                 runOnUiThread(() -> {
                     loadedVocabulary = text;
                     saving = false;
+                    addVocabularyButton.setEnabled(true);
                     dirty = false;
                     message("词库已保存到 Drive · " + draft.terms().size() + " 个词条");
                 });
             } catch (Exception error) { runOnUiThread(() -> {
                 saving = false;
+                addVocabularyButton.setEnabled(true);
                 saveVocabularyButton.setEnabled(true);
-                message("保存失败：" + error.getMessage());
+                message("保存失败，修改仍在当前列表中，请点击“保存修改到 Drive”重试：" + error.getMessage());
             }); }
         });
     }
@@ -354,7 +365,8 @@ public final class SettingsActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
-        worker.shutdownNow();
+        // Let an accepted save finish even if the user leaves this screen.
+        worker.shutdown();
         super.onDestroy();
     }
 }

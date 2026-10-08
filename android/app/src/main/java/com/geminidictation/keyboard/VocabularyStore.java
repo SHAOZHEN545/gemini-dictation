@@ -47,7 +47,10 @@ final class VocabularyStore {
     }
 
     static String read(Context context) throws IOException {
-        Uri uri = selectedUri(context);
+        return read(context, selectedUri(context));
+    }
+
+    static String read(Context context, Uri uri) throws IOException {
         if (uri == null) return "";
         try (InputStream stream = context.getContentResolver().openInputStream(uri)) {
             if (stream == null) throw new IOException("无法读取词库文件");
@@ -65,7 +68,10 @@ final class VocabularyStore {
     }
 
     static void write(Context context, String text) throws IOException {
-        Uri uri = selectedUri(context);
+        write(context, selectedUri(context), text);
+    }
+
+    static void write(Context context, Uri uri, String text) throws IOException {
         if (uri == null) throw new IOException("请先选择 Google Drive 中的词库文件");
         if (text.getBytes(StandardCharsets.UTF_8).length > 256_000) throw new IOException("词库文件过大");
         parse(text); // Do not replace a valid cloud file with an invalid list.
