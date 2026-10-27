@@ -1,14 +1,22 @@
 package com.geminidictation.keyboard;
 
 import android.Manifest;
+import android.content.ClipData;
+import android.content.ClipDescription;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.inputmethodservice.InputMethodService;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -21,12 +29,29 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class VoiceInputService extends InputMethodService implements DictationJob.Listener {
+    private static final int PANEL_VOICE = 0;
+    private static final int PANEL_EDIT = 1;
+    private static final int PANEL_CLIPBOARD = 2;
+    // Shared by keyboard service instances in this process; used on the main thread.
+    private static ClipboardHistory clipboardHistory;
+    /** Last system clipboard text already considered, so deleted entries do not come back. */
+    private static String lastSystemClip;
+    private static final ExecutorService CLIPBOARD_SAVER = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
+    private ClipboardManager clipboard;
+    private final ClipboardManager.OnPrimaryClipChangedListener clipListener = this::recordSystemClip;
     private DictationJob job;
     private TextView status;
     private ProgressBar progressBar;
@@ -36,10 +61,15 @@ public final class VoiceInputService extends InputMethodService implements Dicta
     private Button microphone;
     private Button voiceTab;
     private Button editTab;
+    private Button clipboardTab;
     private Button pasteButton;
     private LinearLayout voicePanel;
     private LinearLayout editPanel;
-    private String oneTimeCopy;
+    private LinearLayout clipboardPanel;
+    private LinearLayout clipboardList;
+    private TextView clipboardTitle;
+    private Button clearClipboardButton;
+    private boolean confirmingClear;
     private PcmRecorder recorder;
     private boolean finishingRecording;
     private int recordingSession;
@@ -60,6 +90,10 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         confirmingDiscard = false;
         updateUi();
     };
+    private final Runnable cancelClearConfirmation = () -> {
+        confirmingClear = false;
+        renderClipboard();
+    };
     private final Runnable repeatDelete = new Runnable() {
         @Override public void run() {
             if (!deleting) return;
@@ -73,6 +107,9 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         job = DictationJob.get(this);
         job.setListener(this);
         inputSession = job.newInputSession();
+        if (clipboardHistory == null) clipboardHistory = ClipboardHistory.deserialize(readClipboardFile());
+        clipboard = getSystemService(ClipboardManager.class);
+        clipboard.addPrimaryClipChangedListener(clipListener);
     }
 
     @Override public View onCreateInputView() {
@@ -98,8 +135,9 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         LinearLayout tabs = new LinearLayout(this);
         tabs.setGravity(Gravity.CENTER_VERTICAL);
         body.addView(tabs);
-        voiceTab = key(tabs, "🎙 语音", 2, () -> showPanel(false));
-        editTab = key(tabs, "✎ 编辑", 2, () -> showPanel(true));
+        voiceTab = key(tabs, "🎙 语音", 2, () -> showPanel(PANEL_VOICE));
+        editTab = key(tabs, "✎ 编辑", 2, () -> showPanel(PANEL_EDIT));
+        clipboardTab = key(tabs, "📋 剪贴板", 2, () -> showPanel(PANEL_CLIPBOARD));
         key(tabs, "🌐", 1, () -> {
             if (shouldOfferSwitchingToNextInputMethod()) switchToNextInputMethod(false);
             else ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).showInputMethodPicker();
@@ -151,8 +189,28 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         editPanel.addView(actions);
         key(actions, "全选", 1, this::selectAll);
         key(actions, "复制", 1, this::copyOnce);
-        pasteButton = key(actions, "粘贴一次", 1, this::pasteOnce);
-        showPanel(false);
+        pasteButton = key(actions, "粘贴", 1, this::pasteLatest);
+
+        clipboardPanel = new LinearLayout(this);
+        clipboardPanel.setOrientation(LinearLayout.VERTICAL);
+        body.addView(clipboardPanel);
+        LinearLayout clipboardHeader = new LinearLayout(this);
+        clipboardHeader.setGravity(Gravity.CENTER_VERTICAL);
+        clipboardPanel.addView(clipboardHeader);
+        clipboardTitle = new TextView(this);
+        clipboardTitle.setTextColor(Color.rgb(200, 210, 228));
+        clipboardTitle.setTextSize(13);
+        clipboardHeader.addView(clipboardTitle, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 3));
+        clearClipboardButton = key(clipboardHeader, "清空", 1, this::clearClipboardClicked);
+        ScrollView clipboardScroll = new ScrollView(this);
+        clipboardScroll.setScrollbarFadingEnabled(false);
+        clipboardList = new LinearLayout(this);
+        clipboardList.setOrientation(LinearLayout.VERTICAL);
+        clipboardScroll.addView(clipboardList);
+        clipboardPanel.addView(clipboardScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(190)));
+        showPanel(PANEL_VOICE);
         refreshStatus();
         return body;
     }
@@ -168,6 +226,8 @@ public final class VoiceInputService extends InputMethodService implements Dicta
 
     @Override public void onStartInputView(EditorInfo info, boolean restarting) {
         super.onStartInputView(info, restarting);
+        // Picks up a copy made while another keyboard was active.
+        recordSystemClip();
         refreshStatus();
     }
 
@@ -359,11 +419,15 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         target.commitText("\n", 1);
     }
 
-    private void showPanel(boolean editing) {
-        voicePanel.setVisibility(editing ? View.GONE : View.VISIBLE);
-        editPanel.setVisibility(editing ? View.VISIBLE : View.GONE);
-        voiceTab.setEnabled(editing);
-        editTab.setEnabled(!editing);
+    private void showPanel(int panel) {
+        voicePanel.setVisibility(panel == PANEL_VOICE ? View.VISIBLE : View.GONE);
+        editPanel.setVisibility(panel == PANEL_EDIT ? View.VISIBLE : View.GONE);
+        clipboardPanel.setVisibility(panel == PANEL_CLIPBOARD ? View.VISIBLE : View.GONE);
+        voiceTab.setEnabled(panel != PANEL_VOICE);
+        editTab.setEnabled(panel != PANEL_EDIT);
+        clipboardTab.setEnabled(panel != PANEL_CLIPBOARD);
+        confirmingClear = false;
+        renderClipboard();
         updateUi();
     }
 
@@ -391,19 +455,155 @@ public final class VoiceInputService extends InputMethodService implements Dicta
             show("请先选中文字；可点“全选”");
             return;
         }
-        oneTimeCopy = selected.toString();
-        show("已暂存选中文字，粘贴一次后清除");
+        String text = selected.toString();
+        lastSystemClip = text;
+        addToClipboardHistory(text);
+        try {
+            clipboard.setPrimaryClip(ClipData.newPlainText("文字", text));
+        } catch (RuntimeException ignored) {
+            // Still kept in the keyboard's clipboard history.
+        }
+        show("已复制，可在「剪贴板」里再次粘贴");
+    }
+
+    private void pasteLatest() {
+        List<String> items = clipboardHistory.items();
+        if (!items.isEmpty()) pasteClip(items.get(0));
+    }
+
+    private void pasteClip(String text) {
+        InputConnection target = getCurrentInputConnection();
+        if (target == null) show("请先点一个输入框");
+        else if (target.commitText(text, 1)) show("已粘贴");
+        else show("当前输入框无法粘贴");
+    }
+
+    private void recordSystemClip() {
+        try {
+            ClipData clip = clipboard.getPrimaryClip();
+            if (clip == null || clip.getItemCount() == 0) return;
+            ClipDescription description = clip.getDescription();
+            // Password managers mark copied secrets as sensitive; never keep those.
+            if (description != null && description.getExtras() != null &&
+                    description.getExtras().getBoolean("android.content.extra.IS_SENSITIVE")) return;
+            CharSequence text = clip.getItemAt(0).getText();
+            if (text == null || text.toString().equals(lastSystemClip)) return;
+            lastSystemClip = text.toString();
+            addToClipboardHistory(text);
+        } catch (RuntimeException ignored) {
+            // The clipboard may be unavailable to the keyboard; history stays as it is.
+        }
+    }
+
+    private void addToClipboardHistory(CharSequence text) {
+        if (!clipboardHistory.add(text)) return;
+        saveClipboardHistory();
+        renderClipboard();
         updateUi();
     }
 
-    private void pasteOnce() {
-        InputConnection target = getCurrentInputConnection();
-        if (target == null || oneTimeCopy == null) return;
-        if (target.commitText(oneTimeCopy, 1)) {
-            oneTimeCopy = null;
-            show("已粘贴，暂存内容已清除");
-            updateUi();
-        } else show("当前输入框无法粘贴，暂存内容仍在");
+    private void deleteClip(String text) {
+        int index = clipboardHistory.items().indexOf(text);
+        if (index < 0) return;
+        clipboardHistory.remove(index);
+        forgetSystemClip(text);
+        saveClipboardHistory();
+        show("已删除一条剪贴板记录");
+        renderClipboard();
+        updateUi();
+    }
+
+    private void clearClipboardClicked() {
+        if (!confirmingClear) {
+            confirmingClear = true;
+            main.removeCallbacks(cancelClearConfirmation);
+            main.postDelayed(cancelClearConfirmation, 3000);
+            renderClipboard();
+            return;
+        }
+        confirmingClear = false;
+        main.removeCallbacks(cancelClearConfirmation);
+        for (String item : clipboardHistory.items()) forgetSystemClip(item);
+        clipboardHistory.clear();
+        saveClipboardHistory();
+        show("剪贴板已清空");
+        renderClipboard();
+        updateUi();
+    }
+
+    /** Also clears the system clipboard when it still holds a deleted text. */
+    private void forgetSystemClip(String text) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return;
+        try {
+            ClipData clip = clipboard.getPrimaryClip();
+            CharSequence current = clip == null || clip.getItemCount() == 0 ? null : clip.getItemAt(0).getText();
+            if (current != null && current.toString().equals(text)) clipboard.clearPrimaryClip();
+        } catch (RuntimeException ignored) {
+            // Nothing else to clean up.
+        }
+    }
+
+    private void renderClipboard() {
+        if (clipboardList == null) return;
+        List<String> items = clipboardHistory.items();
+        clipboardTitle.setText("最近复制 " + items.size() + "/" + ClipboardHistory.LIMIT + " · 点一下粘贴，长按删除");
+        clearClipboardButton.setText(confirmingClear ? "再点确认清空" : "清空");
+        clearClipboardButton.setEnabled(!items.isEmpty());
+        clipboardList.removeAllViews();
+        if (items.isEmpty()) {
+            TextView empty = new TextView(this);
+            empty.setTextColor(Color.rgb(200, 210, 228));
+            empty.setTextSize(14);
+            empty.setPadding(dp(4), dp(10), dp(4), dp(10));
+            empty.setText("还没有复制过文字。在任意 App 里复制后会出现在这里，最多保留最近 "
+                    + ClipboardHistory.LIMIT + " 条。");
+            clipboardList.addView(empty);
+            return;
+        }
+        for (String item : items) {
+            TextView row = new TextView(this);
+            row.setText(item.replaceAll("\\s+", " ").trim());
+            row.setMaxLines(2);
+            row.setEllipsize(TextUtils.TruncateAt.END);
+            row.setTextColor(Color.WHITE);
+            row.setTextSize(15);
+            row.setPadding(dp(10), dp(8), dp(10), dp(8));
+            row.setBackground(new RippleDrawable(ColorStateList.valueOf(Color.rgb(86, 110, 150)),
+                    new ColorDrawable(Color.rgb(40, 56, 84)), null));
+            row.setOnClickListener(view -> pasteClip(item));
+            row.setOnLongClickListener(view -> {
+                deleteClip(item);
+                return true;
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            params.bottomMargin = dp(4);
+            clipboardList.addView(row, params);
+        }
+    }
+
+    private File clipboardFile() { return new File(getNoBackupFilesDir(), "clipboard-history.bin"); }
+
+    private byte[] readClipboardFile() {
+        File file = clipboardFile();
+        if (!file.isFile()) return null;
+        try {
+            return Files.readAllBytes(file.toPath());
+        } catch (IOException error) {
+            return null;
+        }
+    }
+
+    private void saveClipboardHistory() {
+        byte[] data = clipboardHistory.serialize();
+        File file = clipboardFile();
+        CLIPBOARD_SAVER.execute(() -> {
+            try {
+                DictationStore.write(file, data);
+            } catch (IOException ignored) {
+                // The history is still in memory and is saved again on the next change.
+            }
+        });
     }
 
     private void deleteOnce() {
@@ -437,7 +637,7 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         microphone.setEnabled(recorder != null ||
                 !finishingRecording && !job.hasUnfinished() && !privateField);
         microphone.setText(recorder == null ? "🎙 录音" : "■ 结束");
-        if (pasteButton != null) pasteButton.setEnabled(oneTimeCopy != null);
+        if (pasteButton != null) pasteButton.setEnabled(!clipboardHistory.items().isEmpty());
         boolean saved = !job.running && (job.pendingText != null || job.audioKept);
         pendingPanel.setVisibility(recorder != null || job.running || saved ? View.VISIBLE : View.GONE);
         pendingAction.setVisibility(saved && recorder == null ? View.VISIBLE : View.GONE);
@@ -456,7 +656,7 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         stopDeleting();
         main.removeCallbacksAndMessages(null);
         job.clearListener(this);
-        oneTimeCopy = null;
+        clipboard.removePrimaryClipChangedListener(clipListener);
         super.onDestroy();
     }
 }

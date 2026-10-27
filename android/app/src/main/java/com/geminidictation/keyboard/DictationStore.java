@@ -46,7 +46,7 @@ final class DictationStore {
         text.delete();
     }
 
-    private static void write(File target, byte[] data) throws IOException {
+    static void write(File target, byte[] data) throws IOException {
         File temporary = new File(target.getPath() + ".tmp");
         try (FileOutputStream output = new FileOutputStream(temporary)) {
             output.write(data);
