@@ -26,6 +26,7 @@ globalThis.window = {
 };
 
 const { DriveVocabulary } = await import("../web/drive-vocabulary.js");
+const { t } = await import("../web/i18n.js");
 
 test("reads the selected plain text file and saves an unchanged version", async () => {
   let remote = "# note\nalpha\n";
@@ -62,7 +63,7 @@ test("refuses to overwrite a file changed by another device", async () => {
   drive.fileId = "file-123";
   await drive.read("client-id");
   remote = "alpha\nother-device\n";
-  await assert.rejects(drive.save("client-id", "alpha\nmy-edit\n"), /其他设备修改/);
+  await assert.rejects(drive.save("client-id", "alpha\nmy-edit\n"), { message: t("drive.changedElsewhere") });
   assert.equal(patches, 0);
   assert.equal(drive.loadedText, null);
 });

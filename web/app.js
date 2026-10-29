@@ -2,16 +2,23 @@ import { LIVE_RECORDING_SECONDS, SAMPLE_RATE, clockText, decodeToPcm, transcribe
 import { LocalRecorder, listMicrophones, primeAudio } from "./recorder.js";
 import { deleteJob, loadJobs, saveJob } from "./store.js";
 import { DriveVocabulary } from "./drive-vocabulary.js";
+import { lang, t, translatePage } from "./i18n.js";
+
+translatePage();
 
 // Same scheduling rules as the desktop app (see MAX_PARALLEL_JOBS in gui.py).
 const MAX_PARALLEL_JOBS = 3;
 const MAX_ATTEMPTS = 4;
 const RETRY_BACKOFF_SECONDS = [10, 30, 60];
 const QUOTA_ERROR = /\b(429|409)\b|resource.?exhausted|quota|rate.?limit/i;
-const TRANSIENT_ERROR = /\b(1006|1011|1013|500|502|503|504)\b|unavailable|overloaded|deadline|timed? ?out|connection|连接|没有返回/i;
-const FATAL_ERROR = /api.?key|permission|\b(400|401|403)\b|安全时长/i;
+// The last alternatives in these two patterns match our own Live errors (see live.* in i18n.js) in both UI languages.
+const TRANSIENT_ERROR = /\b(1006|1011|1013|500|502|503|504)\b|unavailable|overloaded|deadline|timed? ?out|connection|no final text|连接|没有返回/i;
+const FATAL_ERROR = /api.?key|permission|\b(400|401|403)\b|safe limit|安全时长/i;
 const KEY_STORAGE = "gemini-api-key";
 const VOCABULARY_STORAGE = "personal-vocabulary";
+// Stored as job.source for recordings made in the app (anything else is an imported file name).
+// Kept as the value earlier versions saved so existing jobs still display correctly.
+const RECORDED_SOURCE = "录音";
 
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -97,7 +104,7 @@ async function copyText(text) {
 }
 
 function timeOfDay(ms) {
-  return new Date(ms).toLocaleTimeString("zh-CN", { hour12: false });
+  return new Date(ms).toLocaleTimeString(lang, { hour12: false });
 }
 
 /** Seconds to wait before retrying a failed job, or null when retrying cannot help. */
@@ -118,7 +125,7 @@ function recordingLimit() {
 function parseVocabulary(text) {
   const terms = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
   const unique = [...new Set(terms)];
-  if (unique.length > 1000) throw new Error("Gemini 最多接受 1,000 个词条。");
+  if (unique.length > 1000) throw new Error(t("vocabulary.tooMany"));
   return unique;
 }
 
@@ -133,9 +140,9 @@ function loadVocabulary() {
       vocabulary = parseVocabulary(Array.isArray(legacy) ? legacy.join("\n") : "");
       if (vocabulary.length) localStorage.setItem(VOCABULARY_STORAGE, vocabulary.join("\n"));
     }
-    ui.vocabularyStatus.textContent = `个人词库：${vocabulary.length} 项（仅本设备）`;
+    ui.vocabularyStatus.textContent = t("vocabulary.statusLocal", { count: vocabulary.length });
   } catch (error) {
-    ui.vocabularyStatus.textContent = `个人词库需要检查：${error.message}`;
+    ui.vocabularyStatus.textContent = t("vocabulary.invalid", { error: error.message });
   }
   refreshSettingsSummary();
 }
@@ -145,7 +152,7 @@ function driveConfig() {
   const apiKey = ui.driveApiKey.value.trim();
   const projectNumber = ui.driveProjectNumber.value.trim();
   if (!clientId || !apiKey || !/^\d+$/.test(projectNumber)) {
-    throw new Error("请填写网页 OAuth 客户端 ID、Picker API key 和数字项目编号");
+    throw new Error(t("drive.configMissing"));
   }
   localStorage.setItem("drive-client-id", clientId);
   localStorage.setItem("drive-api-key", apiKey);
@@ -156,15 +163,15 @@ function driveConfig() {
 function showDriveState() {
   if (drive.fileId) {
     const ready = drive.loadedText !== null;
-    ui.driveStatus.textContent = `${drive.fileName} · ${ready ? "已读取" : "需要重新读取"}`;
+    ui.driveStatus.textContent = `${drive.fileName} · ${t(ready ? "drive.loaded" : "drive.needsReload")}`;
     ui.vocabularyStatus.textContent = ready
-      ? `个人词库：${vocabulary.length} 项（Google Drive：${drive.fileName}）`
-      : `个人词库：Drive 文件 ${drive.fileName} 尚未读取`;
-    ui.saveVocabulary.textContent = "保存到 Google Drive";
+      ? t("vocabulary.statusDrive", { count: vocabulary.length, name: drive.fileName })
+      : t("vocabulary.statusDriveUnread", { name: drive.fileName });
+    ui.saveVocabulary.textContent = t("vocabulary.saveDrive");
   } else {
-    ui.driveStatus.textContent = "尚未连接 Drive 文件";
-    ui.vocabularyStatus.textContent = `个人词库：${vocabulary.length} 项（仅本设备）`;
-    ui.saveVocabulary.textContent = "保存到本设备";
+    ui.driveStatus.textContent = t("drive.notConnected");
+    ui.vocabularyStatus.textContent = t("vocabulary.statusLocal", { count: vocabulary.length });
+    ui.saveVocabulary.textContent = t("vocabulary.saveLocal");
   }
   refreshSettingsSummary();
 }
@@ -186,7 +193,7 @@ async function freshVocabulary() {
   } catch (error) {
     drive.loadedText = null;
     showDriveState();
-    setStatus(`无法读取 Drive 词库：${error.message}`);
+    setStatus(t("drive.readFailed", { error: error.message }));
     return false;
   }
 }
@@ -212,16 +219,16 @@ function renderVocabulary() {
 // ---------- settings ----------
 
 function refreshSettingsSummary() {
-  const key = apiKey() ? (keyVerified ? "Key 已验证" : "Key 已保存") : "未设置 Key";
-  ui.settingsSummary.textContent = `${key} · ${ui.mode.value} · 个人词库 ${vocabulary.length} 项`;
+  const key = t(apiKey() ? (keyVerified ? "summary.keyVerified" : "summary.keySaved") : "summary.keyUnset");
+  ui.settingsSummary.textContent = t("summary", { key, mode: ui.mode.value, count: vocabulary.length });
 }
 
 function refreshKeyStatus() {
   if (apiKey()) {
-    ui.keyStatus.textContent = `API key：${keyVerified ? "本次转写已成功验证" : "已保存在这个浏览器；尚未向 Google 验证"}`;
+    ui.keyStatus.textContent = t(keyVerified ? "keyStatus.verified" : "keyStatus.unverified");
     ui.forgetKey.hidden = false;
   } else {
-    ui.keyStatus.textContent = "API key：尚未设置（可从 Bitwarden 复制粘贴）";
+    ui.keyStatus.textContent = t("keyStatus.unset");
     ui.forgetKey.hidden = true;
   }
   refreshSettingsSummary();
@@ -231,10 +238,10 @@ async function refreshMicrophones() {
   try {
     const microphones = await listMicrophones();
     const saved = localStorage.getItem("microphone") || "";
-    const options = [new Option("系统默认", "")];
+    const options = [new Option(t("mic.default"), "")];
     for (const [index, device] of microphones.entries()) {
       if (device.deviceId === "default") continue;
-      options.push(new Option(device.label || `麦克风 ${index + 1}`, device.deviceId));
+      options.push(new Option(device.label || t("mic.numbered", { number: index + 1 }), device.deviceId));
     }
     ui.microphone.replaceChildren(...options);
     ui.microphone.value = options.some((option) => option.value === saved) ? saved : "";
@@ -275,7 +282,7 @@ function meterLoop() {
   if (!recorder) return;
   const level = recorder.readLevel();
   levels = [...levels.slice(1), level];
-  ui.levelStatus.textContent = level > 5 ? "正在拾音" : "声音偏小 / 安静";
+  ui.levelStatus.textContent = t(level > 5 ? "level.sound" : "level.quiet");
   drawMeter();
   setTimeout(meterLoop, 75);
 }
@@ -302,7 +309,7 @@ async function startRecording() {
   if (!apiKey()) {
     ui.settings.open = true;
     ui.keyInput.focus();
-    setStatus("请先粘贴并保存 API key");
+    setStatus(t("key.missing"));
     return false;
   }
   if (!(await freshVocabulary())) return false;
@@ -313,19 +320,19 @@ async function startRecording() {
   } catch (error) {
     take.discard();
     ui.record.disabled = false;
-    setStatus(error.name === "NotAllowedError" ? "没有麦克风权限，请在浏览器设置中允许" : `麦克风无法打开：${error.message}`);
+    setStatus(error.name === "NotAllowedError" ? t("mic.denied") : t("mic.failed", { error: error.message }));
     return false;
   }
   ui.record.disabled = false;
   recorder = take;
   session = { mode: ui.mode.value, vocabulary: [...vocabulary] };
   recordingStarted = performance.now();
-  ui.record.textContent = "结束并提交";
+  ui.record.textContent = t("record.stop");
   ui.record.classList.add("recording");
   ui.next.hidden = false;
   ui.discard.hidden = false;
   ui.mode.disabled = ui.microphone.disabled = true;
-  setStatus(`正在录第 ${nextJobNumber} 段 · 仅在本设备，尚未发送`);
+  setStatus(t("record.recording", { number: nextJobNumber }));
   levels.fill(0);
   meterLoop();
   updateWakeLock();
@@ -339,7 +346,7 @@ function elapsedSeconds() {
 }
 
 function resetControls() {
-  ui.record.textContent = "开始录音";
+  ui.record.textContent = t("record.start");
   ui.record.classList.remove("recording");
   ui.next.hidden = true;
   ui.discard.hidden = true;
@@ -353,16 +360,16 @@ async function stopRecording() {
   const { mode, vocabulary: terms } = session;
   recorder = null;
   resetControls();
-  ui.levelStatus.textContent = "录音已结束";
+  ui.levelStatus.textContent = t("level.ended");
   let audio;
   try {
     audio = await take.finish();
   } catch (error) {
-    setStatus(`录音失败：${error.message}`);
+    setStatus(t("record.failed", { error: error.message }));
     return false;
   }
-  const job = await addJob({ audio, seconds, mode, vocabulary: terms, source: "录音" });
-  setStatus(`第 ${job.number} 段已提交转写 · 可以直接录下一段`);
+  const job = await addJob({ audio, seconds, mode, vocabulary: terms, source: RECORDED_SOURCE });
+  setStatus(t("record.submitted", { number: job.number }));
   return true;
 }
 
@@ -373,8 +380,8 @@ function discardRecording() {
   resetControls();
   levels.fill(0);
   drawMeter();
-  ui.levelStatus.textContent = "录音时显示";
-  setStatus("已放弃这段录音 · 没有保存，也没有发送");
+  ui.levelStatus.textContent = t("level.idle");
+  setStatus(t("record.discarded"));
   updateWakeLock();
 }
 
@@ -383,7 +390,7 @@ function tick() {
   const elapsed = elapsedSeconds();
   const limit = recordingLimit();
   ui.timer.textContent = `${clockText(elapsed)} / ${clockText(limit)}`;
-  if (limit - elapsed === 30) setStatus("还剩 30 秒，届时会自动结束录音并提交");
+  if (limit - elapsed === 30) setStatus(t("record.thirtySecondsLeft"));
   if (elapsed >= limit) stopRecording();
 }
 
@@ -394,15 +401,15 @@ async function importFiles(files) {
       const pcm = await decodeToPcm(file);
       const seconds = Math.round(pcm.length / SAMPLE_RATE);
       if (seconds > LIVE_RECORDING_SECONDS) {
-        setStatus(`${file.name} 长 ${clockText(seconds)}，超过 ${clockText(LIVE_RECORDING_SECONDS)}，请剪短后再导入`);
+        setStatus(t("import.tooLong", { name: file.name, length: clockText(seconds), limit: clockText(LIVE_RECORDING_SECONDS) }));
         continue;
       }
       const job = await addJob({
         audio: file, seconds, mode: ui.mode.value, vocabulary: [...vocabulary], source: file.name,
       });
-      setStatus(`已导入 ${file.name}，作为第 ${job.number} 段转写`);
+      setStatus(t("import.done", { name: file.name, number: job.number }));
     } catch (error) {
-      setStatus(`无法读取 ${file.name}：${error.message}`);
+      setStatus(t("import.failed", { name: file.name, error: error.message }));
     }
   }
 }
@@ -425,7 +432,7 @@ async function addJob({ audio, seconds, mode, vocabulary: terms, source }) {
   try {
     await persist(job);
   } catch (error) {
-    job.error = `无法暂存录音（${error.message}）；请在转写完成前不要关闭页面。`;
+    job.error = t("job.storeFailed", { error: error.message });
   }
   renderJob(job);
   dispatchJobs();
@@ -439,7 +446,7 @@ function dispatchJobs() {
   if (waiting.length && running < MAX_PARALLEL_JOBS && now >= cooldownUntil) {
     const key = apiKey();
     if (key) waiting.slice(0, MAX_PARALLEL_JOBS - running).forEach((job) => runJob(job, key));
-    else setStatus("API key 未设置；保存 Key 后开始转写排队的录音");
+    else setStatus(t("key.missingQueued"));
   }
   refreshJobs();
   updateWakeLock();
@@ -448,7 +455,7 @@ function dispatchJobs() {
 async function runJob(job, key) {
   job.attempts += 1;
   job.state = "running";
-  job.progress = "准备中…";
+  job.progress = t("job.preparing");
   renderJob(job);
   let text = "";
   try {
@@ -461,7 +468,7 @@ async function runJob(job, key) {
       },
     });
   } catch (error) {
-    job.error = String(error?.message || error).replaceAll(key, "[hidden]") || "没有收到文字。";
+    job.error = String(error?.message || error).replaceAll(key, "[hidden]") || t("job.noText");
   }
   if (text) {
     job.state = "done";
@@ -470,22 +477,22 @@ async function runJob(job, key) {
     job.audio = null; // The recording has served its purpose; drop it from this device.
     keyVerified = true;
     refreshKeyStatus();
-    setStatus(`第 ${job.number} 段转写完成`);
+    setStatus(t("job.done", { number: job.number }));
   } else {
     const delay = retryDelay(job.error, job.attempts);
     if (delay === null) {
       job.state = "failed";
-      setStatus(`第 ${job.number} 段转写失败；录音仍暂存在本设备，可点“重试”`);
+      setStatus(t("job.failed", { number: job.number }));
     } else {
       job.state = "retry";
       job.retryAt = Date.now() + delay * 1000;
       if (QUOTA_ERROR.test(job.error)) {
         cooldownUntil = Math.max(cooldownUntil, job.retryAt);
-        job.retryReason = "额度限流";
+        job.retryReason = t("job.reasonQuota");
       } else {
-        job.retryReason = "连接中断";
+        job.retryReason = t("job.reasonConnection");
       }
-      setStatus(`第 ${job.number} 段遇到${job.retryReason}，${delay} 秒后自动重试`);
+      setStatus(t("job.retryScheduled", { number: job.number, reason: job.retryReason, seconds: delay }));
     }
   }
   if (jobs.includes(job)) await persist(job).catch(() => {});
@@ -494,19 +501,25 @@ async function runJob(job, key) {
 }
 
 function jobHeader(job) {
-  const source = job.source === "录音" ? `录音 ${clockText(job.seconds)}` : `导入 ${clockText(job.seconds)} · ${job.source}`;
-  return `第 ${job.number} 段 · ${timeOfDay(job.created)} · ${source} · ${job.mode}`;
+  const length = clockText(job.seconds);
+  const source = job.source === RECORDED_SOURCE
+    ? t("job.sourceRecording", { length })
+    : t("job.sourceImport", { length, name: job.source });
+  return t("job.header", { number: job.number, time: timeOfDay(job.created), source, mode: job.mode });
 }
 
 function jobStateText(job, now) {
   if (job.state === "running") return job.progress;
   if (job.state === "retry") {
-    return `${job.retryReason} · ${clockText(Math.max(0, Math.ceil((job.retryAt - now) / 1000)))} 后第 ${job.attempts + 1} 次尝试`;
+    const time = clockText(Math.max(0, Math.ceil((job.retryAt - now) / 1000)));
+    return t("job.retryState", { reason: job.retryReason, time, attempt: job.attempts + 1 });
   }
-  if (job.state === "failed") return `× 转写失败：${job.error}`;
+  if (job.state === "failed") return t("job.failedState", { error: job.error });
   if (job.state === "queued") {
-    const cooling = cooldownUntil > now ? ` · 限流冷却 ${clockText(Math.ceil((cooldownUntil - now) / 1000))}` : " · 等待空位";
-    return `排队中${cooling}${job.error ? `（上次：${job.error}）` : ""}`;
+    const cooling = cooldownUntil > now
+      ? t("job.cooldown", { time: clockText(Math.ceil((cooldownUntil - now) / 1000)) })
+      : t("job.waitingSlot");
+    return `${t("job.queued")}${cooling}${job.error ? t("job.lastError", { error: job.error }) : ""}`;
   }
   return "";
 }
@@ -521,9 +534,9 @@ function buildJobElement(job) {
     <div class="job-state"></div>
     <textarea rows="4" hidden></textarea>
     <div class="job-actions">
-      <button type="button" data-action="retry" hidden>重试</button>
-      <button type="button" data-action="remove" hidden>移除</button>
-      <button type="button" data-action="copy" hidden>复制本段</button>
+      <button type="button" data-action="retry" hidden>${t("job.retry")}</button>
+      <button type="button" data-action="remove" hidden>${t("job.remove")}</button>
+      <button type="button" data-action="copy" hidden>${t("job.copy")}</button>
     </div>`;
   const textarea = item.querySelector("textarea");
   textarea.addEventListener("input", () => {
@@ -534,7 +547,7 @@ function buildJobElement(job) {
   });
   item.querySelector('[data-action="copy"]').addEventListener("click", async () => {
     await copyText(job.text);
-    toast(`已复制第 ${job.number} 段`);
+    toast(t("job.copied", { number: job.number }));
   });
   item.querySelector('[data-action="retry"]').addEventListener("click", () => {
     if (job.state === "failed") job.attempts = 0; // A manual retry gets a fresh set of automatic retries.
@@ -544,7 +557,7 @@ function buildJobElement(job) {
     dispatchJobs();
   });
   item.querySelector('[data-action="remove"]').addEventListener("click", () => {
-    if (job.state === "failed" && !confirm(`删除第 ${job.number} 段？这段录音没有转写成功，删除后无法恢复。`)) return;
+    if (job.state === "failed" && !confirm(t("job.removeConfirm", { number: job.number }))) return;
     removeJobs([job]);
   });
   ui.jobs.prepend(item);
@@ -577,7 +590,7 @@ function renderJob(job, now = Date.now()) {
   item.querySelector('[data-action="copy"]').hidden = !done;
   const retry = item.querySelector('[data-action="retry"]');
   retry.hidden = !["retry", "failed"].includes(job.state);
-  retry.textContent = job.state === "retry" ? "立即重试" : "重试";
+  retry.textContent = t(job.state === "retry" ? "job.retryNow" : "job.retry");
   item.querySelector('[data-action="remove"]').hidden = !["done", "failed"].includes(job.state);
 }
 
@@ -586,8 +599,8 @@ function refreshJobs() {
   jobs.filter((job) => job.state !== "done").forEach((job) => renderJob(job, now));
   const count = (states) => jobs.filter((job) => states.includes(job.state)).length;
   const waiting = count(["queued", "retry"]);
-  let summary = `转写中 ${count(["running"])} · 排队 ${waiting} · 完成 ${count(["done"])}`;
-  if (cooldownUntil > now && waiting) summary += ` · 限流冷却 ${clockText(Math.ceil((cooldownUntil - now) / 1000))}`;
+  let summary = t("queue.summary", { running: count(["running"]), waiting, done: count(["done"]) });
+  if (cooldownUntil > now && waiting) summary += t("job.cooldown", { time: clockText(Math.ceil((cooldownUntil - now) / 1000)) });
   ui.queueSummary.textContent = jobs.length ? summary : "";
   ui.empty.hidden = jobs.length > 0;
   ui.copyAll.disabled = ui.clearDone.disabled = !jobs.some((job) => job.state === "done");
@@ -614,12 +627,12 @@ ui.keyForm.addEventListener("submit", (event) => {
   ui.keyInput.value = "";
   keyVerified = false;
   refreshKeyStatus();
-  setStatus("API key 已保存在这个浏览器，等待首次转写验证");
+  setStatus(t("key.saved"));
   dispatchJobs();
 });
 
 ui.forgetKey.addEventListener("click", () => {
-  if (!confirm("从这个浏览器删除 API key？")) return;
+  if (!confirm(t("key.forgetConfirm"))) return;
   localStorage.removeItem(KEY_STORAGE);
   keyVerified = false;
   refreshKeyStatus();
@@ -650,14 +663,14 @@ ui.importFile.addEventListener("change", () => {
 ui.copyAll.addEventListener("click", async () => {
   const done = jobs.filter((job) => job.state === "done" && job.text.trim()).map((job) => job.text.trim());
   await copyText(done.join("\n\n"));
-  toast(`已按录音顺序复制 ${done.length} 段`);
+  toast(t("results.copiedAll", { count: done.length }));
 });
 
 ui.clearDone.addEventListener("click", () => {
   const done = jobs.filter((job) => job.state === "done");
-  if (done.length && confirm(`清除 ${done.length} 段已完成的文字？清除后无法恢复，需要的话请先复制。`)) {
+  if (done.length && confirm(t("results.clearConfirm", { count: done.length }))) {
     removeJobs(done);
-    setStatus(`已清除 ${done.length} 段已完成的记录`);
+    setStatus(t("results.cleared", { count: done.length }));
   }
 });
 
@@ -681,7 +694,7 @@ ui.saveVocabulary.addEventListener("click", async () => {
     if (!drive.fileId) ui.vocabularyEditor.value = terms.join("\n");
     showDriveState();
     renderVocabulary();
-    toast(`已保存 ${terms.length} 个词条${drive.fileId ? "到 Drive" : "到本设备"}`);
+    toast(t(drive.fileId ? "vocabulary.savedDrive" : "vocabulary.savedLocal", { count: terms.length }));
   } catch (error) {
     toast(error.message);
     showDriveState();
@@ -729,7 +742,7 @@ async function restoreJobs() {
     const job = { ...record, progress: "", retryAt: 0, retryReason: "" };
     if (job.state === "queued" && !job.audio) {
       job.state = "failed";
-      job.error = "暂存的录音已丢失。";
+      job.error = t("job.audioLost");
     }
     jobs.push(job);
     renderJob(job);
@@ -752,7 +765,7 @@ showDriveState();
 try {
   await restoreJobs();
 } catch (error) {
-  setStatus(`无法读取本设备的转写记录：${error.message}`);
+  setStatus(t("results.loadFailed", { error: error.message }));
 }
 dispatchJobs();
 setInterval(() => {

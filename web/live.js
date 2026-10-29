@@ -1,6 +1,8 @@
 // Whole-recording transcription through the Gemini Live WebSocket, mirroring the desktop
 // LiveReplayWorker: one manual activity wraps the full recording, paced at Live's ~4x speed.
 
+import { t } from "./i18n.js";
+
 export const SAMPLE_RATE = 16_000;
 export const LIVE_RECORDING_SECONDS = 510; // 8m30s leaves room within the 10-minute session.
 const MODEL = "models/gemini-3.5-transcribe-live";
@@ -44,7 +46,7 @@ export async function decodeToPcm(blob) {
     sample = Math.max(-1, Math.min(1, sample / channels.length));
     pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
   }
-  if (!pcm.length) throw new Error("录音里没有声音数据。");
+  if (!pcm.length) throw new Error(t("live.noAudio"));
   return pcm;
 }
 
@@ -62,9 +64,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 export async function transcribeLive({ apiKey, mode, vocabulary, pcm, onProgress }) {
   const audioSeconds = pcm.length / SAMPLE_RATE;
   if (audioSeconds > LIVE_RECORDING_SECONDS + 2) {
-    throw new Error(`这段录音 ${clockText(audioSeconds)}，超过 Live 安全时长 ${clockText(LIVE_RECORDING_SECONDS)}，请分段录制。`);
+    throw new Error(t("live.tooLong", { length: clockText(audioSeconds), limit: clockText(LIVE_RECORDING_SECONDS) }));
   }
-  onProgress("连接中…");
+  onProgress(t("live.connecting"));
   const socket = new WebSocket(`${ENDPOINT}?key=${encodeURIComponent(apiKey)}`);
   socket.binaryType = "arraybuffer";
   const decoder = new TextDecoder();
@@ -84,7 +86,7 @@ export async function transcribeLive({ apiKey, mode, vocabulary, pcm, onProgress
   };
   socket.onclose = (event) => {
     const reason = (event.reason || "").replaceAll(apiKey, "[hidden]");
-    closed = new Error(`Live 连接关闭（${event.code}）${reason ? "：" + reason : ""}`);
+    closed = new Error(t(reason ? "live.closedReason" : "live.closed", { code: event.code, reason }));
     setupDone();
     generationDone();
   };
@@ -92,7 +94,7 @@ export async function transcribeLive({ apiKey, mode, vocabulary, pcm, onProgress
   try {
     await new Promise((resolve, reject) => {
       socket.onopen = resolve;
-      socket.onerror = () => setTimeout(() => reject(closed || new Error("Live 连接失败（connection）。")), 50);
+      socket.onerror = () => setTimeout(() => reject(closed || new Error(t("live.connectFailed"))), 50);
     });
     socket.onerror = null;
     socket.send(
@@ -117,9 +119,9 @@ export async function transcribeLive({ apiKey, mode, vocabulary, pcm, onProgress
       if (percent >= reported + 5) {
         reported = percent;
         const remaining = Math.max(0, Math.round(estimate - (performance.now() - started) / 1000));
-        onProgress(`发送中 ${percent}% · 约剩 ${clockText(remaining)}`);
+        onProgress(t("live.sending", { percent, time: clockText(remaining) }));
       }
-      if (closed) throw new Error(`${closed.message}；Live 连接在录音发送完之前关闭。`);
+      if (closed) throw new Error(t("live.closedEarly", { error: closed.message }));
       const position = offset / SAMPLE_RATE;
       const sendAt = started + (Math.max(0, position - LIVE_HEAD_START_SECONDS) / LIVE_SEND_SPEED) * 1000;
       const wait = sendAt - performance.now();
@@ -133,7 +135,7 @@ export async function transcribeLive({ apiKey, mode, vocabulary, pcm, onProgress
       );
     }
     socket.send(JSON.stringify({ realtimeInput: { activityEnd: {} } }));
-    onProgress("录音已送完，等待定稿…");
+    onProgress(t("live.finalizing"));
     const timeout = (LIVE_FINALIZATION_SECONDS + (audioSeconds / LIVE_PROCESSING_SPEED) * 2) * 1000;
     await Promise.race([generationComplete, sleep(timeout)]);
   } finally {
@@ -141,6 +143,6 @@ export async function transcribeLive({ apiKey, mode, vocabulary, pcm, onProgress
     if (socket.readyState <= WebSocket.OPEN) socket.close();
   }
   const text = joinLiveTranscripts(finalParts);
-  if (!text) throw closed || new Error("Live 没有返回最终文字。");
+  if (!text) throw closed || new Error(t("live.noFinalText"));
   return text;
 }

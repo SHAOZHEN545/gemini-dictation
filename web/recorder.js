@@ -1,5 +1,7 @@
 // Local-only recording: nothing leaves the device until finish() hands back the audio.
 
+import { t } from "./i18n.js";
+
 const MIME_TYPES = ["audio/webm;codecs=opus", "audio/mp4", "audio/webm"];
 let meterContext = null;
 
@@ -81,7 +83,7 @@ export class LocalRecorder {
         this._release();
         const blob = new Blob(this.chunks, { type: this.recorder.mimeType || "audio/webm" });
         this.chunks = [];
-        blob.size ? resolve(blob) : reject(new Error("没有录到声音，请检查麦克风权限。"));
+        blob.size ? resolve(blob) : reject(new Error(t("record.noSound")));
       };
       this.recorder.stop();
     });
