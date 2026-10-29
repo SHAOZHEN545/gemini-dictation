@@ -1,110 +1,213 @@
 # Gemini Live Dictation
 
-## 新电脑：双击安装与启动
+Personal dictation with Gemini Live Transcription, in three forms: a Windows desktop app, a
+browser app, and an Android voice keyboard. You record first; when you finish, the whole
+recording is sent to `gemini-3.5-transcribe-live` and the final text comes back in one piece,
+so it is not cut at every pause. Your personal vocabulary (names, technical terms) is sent with
+each recording to improve accuracy. Each app uses your own Gemini API key; nothing goes
+through a server of ours.
 
-Windows 10 / 11 的 Intel / AMD 64 位电脑可以直接使用：
+The apps show English by default and Simplified Chinese when the system or browser language
+is Chinese.
 
-1. 从 GitHub 下载仓库 ZIP，**先完整解压**到一个准备长期保留的文件夹；如果已经克隆仓库，直接使用该文件夹。
-2. 双击 **`Install Dictation.cmd`**。安装窗口会显示进度，自动下载独立的 Python 运行环境、安装桌面和音频组件、创建桌面快捷方式，并打开程序。首次安装需要联网，可能需要几分钟；无需输入命令、预装 Python 或使用管理员权限。
-3. 在程序里粘贴自己的 **Gemini API Key**，点击“保存 Key”。新电脑需要重新填写，GitHub 仓库不会携带其他电脑的 Key。
-4. 如果要使用云端词库，先安装并登录 **Google Drive 桌面版**，再点程序里的“选择词库文件”，选择同步到这台电脑的那份 `.txt`。也可以先使用本机词库开始录音。
+## New computer: double-click install and start
 
-以后双击桌面的 **Gemini Dictation** 或项目里的 **`Start Dictation.cmd`** 即可。首次直接点“Start”时，如果还没有运行环境，也会打开安装窗口。更新仓库后，可以再次双击“Install”更新依赖；已有 Key、词库、录音和转写文件会保留。
+Works on 64-bit Intel / AMD PCs with Windows 10 / 11:
 
-请保留项目文件夹：快捷方式指向其中的程序，移动文件夹后需要在新位置重新双击安装。安装工具、下载缓存放在 `.runtime/`，运行环境放在 `.venv/`，均不会提交到 Git。安装失败会显示原因，并保存 `.runtime/install.log`；启动时发生程序错误会显示提示并保存 `.runtime/launch-error.log`。
+1. Download the repository ZIP from GitHub and **extract it completely** into a folder you
+   plan to keep; if you already cloned the repository, use that folder.
+2. Double-click **`Install Dictation.cmd`**. The installer window shows its progress: it
+   downloads a private Python runtime, installs the desktop and audio components, creates a
+   desktop shortcut, and opens the app. The first install needs internet access and can take
+   a few minutes; no commands, preinstalled Python, or administrator rights are needed.
+3. Paste your own **Gemini API key** in the app and click "{{DESKTOP:保存 Key}}". Each new
+   computer needs the key again; the GitHub repository never carries keys from other
+   computers.
+4. To use a cloud vocabulary, install and sign in to **Google Drive for desktop**, then click
+   "{{DESKTOP:选择词库文件}}" in the app and pick the `.txt` file Drive syncs to this computer.
+   You can also start with a local vocabulary.
 
-安装流程使用固定版本、校验 SHA-256 的 [uv 官方发布文件](https://github.com/astral-sh/uv/releases/tag/0.12.19)，由 uv 下载本项目独立使用的 Python，不修改系统 PATH。运行环境管理方式见 [uv 文档](https://docs.astral.sh/uv/guides/install-python/)。首次安装需能访问 GitHub 和 PyPI。
+After that, double-click **Gemini Dictation** on the desktop or **`Start Dictation.cmd`** in
+the project. If the runtime is missing when you click "Start", the installer opens first.
+After updating the repository, double-click "Install" again to update dependencies; your key,
+vocabulary, recordings, and transcripts are kept.
 
-手机上请按下方 Android 说明安装 APK；仅在电脑下载仓库不会安装手机输入法。网页版也可直接在浏览器使用，无需安装桌面程序。
+Keep the project folder: the shortcut points to the app inside it, so after moving the folder,
+double-click Install again in the new location. Installer tools and download caches live in
+`.runtime/`, the runtime in `.venv/`; neither is committed to Git. If installation fails, the
+reason is shown and saved to `.runtime/install.log`; a program error at startup is shown and
+saved to `.runtime/launch-error.log`.
 
-Windows 窗口、任务栏、安装窗口和桌面快捷方式，以及 Android 应用和网页主屏幕图标统一使用可达鸭。更新后重启桌面程序，并再次运行 `Install Dictation.cmd` 刷新桌面快捷方式；如任务栏固定图标仍显示旧图标，取消固定后从新版程序重新固定。Android 需安装新版 APK；网页需发布新版，已添加到手机主屏幕的旧图标如未刷新，可删除快捷方式后重新添加。
+The installer uses a pinned, SHA-256-verified
+[official uv release](https://github.com/astral-sh/uv/releases/tag/0.12.19). uv downloads a
+Python used only by this project and does not change the system PATH; see the
+[uv docs](https://docs.astral.sh/uv/guides/install-python/). The first install needs access
+to GitHub and PyPI.
 
-原始图标保存在 `gemini_live_dictation/assets/app-icon.png`，Windows ICO、Android 各密度与自适应图标、网页图标均由 `scripts/generate-icons.py` 生成。修改原图后，在装有 Pillow 的开发环境运行该脚本即可更新；应用运行时不需要 Pillow。
+On a phone, install the APK as described below; downloading the repository on a computer does
+not install the keyboard. The web app also runs directly in a browser without installing
+anything.
 
-## Android 语音输入法（测试版）
+The Windows window, taskbar, installer, and desktop shortcut, the Android app, and the web
+home-screen icon all use the same Psyduck icon. After an update, restart the desktop app and
+run `Install Dictation.cmd` again to refresh the desktop shortcut; if a pinned taskbar icon
+still shows the old icon, unpin it and pin the new app again. Android needs the new APK. For
+the web app, publish the new version; if a home-screen shortcut keeps the old icon, delete it
+and add it again.
 
-`android/` 中新增 Android 系统输入法：可以在三星手机的其他 App 输入框里点击麦克风口述，转写结果直接输入。词库通过 Android 系统文件选择器授权读写 Google Drive 中的一份 `.txt` 文件；Gemini API Key 从 Bitwarden 粘贴后加密保存在手机本地。安装和使用步骤见 [Android 说明](android/README.md)。
+The original icon is `gemini_live_dictation/assets/app-icon.png`. The Windows ICO, the Android
+density-specific and adaptive icons, and the web icons are generated from it by
+`scripts/generate-icons.py`; after changing the original, run the script in a development
+environment with Pillow. The apps do not need Pillow at runtime.
 
-## 桌面版（Windows）
+## Android voice keyboard (test build)
 
-这个项目有一个本地桌面界面。打开后选择 `VERBATIM` 或 `SMART`、选择麦克风，
-点“开始录音”说话，再点“结束录音”。录音期间只在本机缓存，不会发送给 Gemini，
-也不会提前显示转写。默认选择 `gemini-3.5-transcribe-live`：结束录音后，程序关闭 Live 的
-自动断句，把整段录音作为“一句话”以约 4 倍速发送（Live 自身约以 4 倍速处理；发得更快会让未处理的音频积压，超过约
-80 秒时服务器会断开连接），Live 结合整段上下文一次给出最终文字。
-这样不会在每次停顿处单独定稿、断章取义；实测等待时间约为录音时长的四分之一（1 分钟录音约
-等 15–20 秒）。界面中的声量条仅显示本机麦克风的输入电平。
-录完一段不必等转写：点“结束并提交”后可以马上录下一段，录音时也可以点“提交，录下一段”一步
-完成。录得不满意时点“× 放弃本段”：这段录音直接丢弃，不保存到本机，也不发送给 Gemini。
-每段录音是独立的转写任务，在左侧列表里显示排队、发送进度、完成或重试倒计时；最多同时
-转写 3 段，其余按录音顺序排队。Live 的并发会话额度没有公开文档：用本机 key 同时开 10 个会话，
-有 5–8 个被接受，其余立即返回 `1011 … exceeded your current quota`，稍等即可恢复。因此遇到
-额度限流时，程序暂停启动新任务，按服务器提示（没有提示时依次等 10 / 30 / 60 秒）自动重试，
-最多 4 次；连接中断也会自动重试，API key 无效等无法靠重试解决的错误会直接标为失败，可手动“重试”。
-选中任一段可查看、修改和“复制本段”；“复制全部”按录音顺序合并所有已完成的段落。
-列表太长时，可以多选后点“移除所选”（或按 Delete），或点“清除已完成”；这只是从列表中移除，
-`transcripts/` 里的文件不会删除，在窗口里改过的文字会先写回转写文件。
-正在转写或排队的段落不能移除。
-每段文字也会保存在本机的 `transcripts/`。
-录音在转写完成前暂存在本机的 `recordings/`；文字写入 `transcripts/` 后，录音自动删除。
-转写失败的录音会保留，以便重试。两个文件夹都被 Git 忽略。
+`android/` contains an Android system keyboard (input method): tap the microphone in any app's
+text field, speak, and the transcript is typed in. The vocabulary is a single `.txt` file in
+Google Drive that you grant read/write access to through the Android file picker. The Gemini
+API key is pasted once (e.g. from Bitwarden) and stored encrypted on the phone. Installation
+and usage: [Android guide](android/README.md).
 
-推荐直接按上面的“双击安装与启动”操作。如果已经准备好 Python 虚拟环境，开发时也可以手动安装桌面版：
+## Desktop app (Windows)
+
+The desktop app has a local window. Choose `VERBATIM` or `SMART`, pick a microphone, click
+"{{DESKTOP:开始录音}}", speak, then click "{{DESKTOP:结束录音}}". While recording, audio stays
+on this computer: nothing is sent to Gemini and no partial transcript is shown. The default
+model is `gemini-3.5-transcribe-live`: after you stop, the app turns off Live's automatic
+segmentation and sends the whole recording as one "utterance" at about 4× speed (Live itself
+processes at about 4×; sending faster lets unprocessed audio pile up, and past roughly 80
+seconds of backlog the server disconnects). Live then returns the final text using the context
+of the whole recording, instead of finalizing each pause on its own. In practice the wait is
+about a quarter of the recording length (a 1-minute recording takes about 15–20 seconds). The
+level meter only shows the local microphone input level.
+
+You don't have to wait for a transcript before recording again: click
+"{{DESKTOP:结束并提交}}" and start the next clip right away, or click
+"{{DESKTOP:提交，录下一段}}" while recording to do both in one step. If you don't like a clip,
+click "{{DESKTOP:× 放弃本段}}": the recording is dropped, not saved locally, and not sent to
+Gemini.
+
+Each clip is a separate transcription job. The list on the left shows queued, sending
+progress, done, or a retry countdown. Up to 3 clips are transcribed at once; the rest wait in
+recording order. Live's concurrent-session quota is not documented: opening 10 sessions at
+once with one key, 5–8 were accepted and the rest immediately returned
+`1011 … exceeded your current quota`, recovering after a short wait. So when rate-limited, the
+app stops starting new jobs and retries automatically after the delay the server suggests (or
+10 / 30 / 60 seconds when it gives none), up to 4 times. Dropped connections are retried as
+well. Errors that retrying cannot fix, such as an invalid API key, are marked failed right
+away and can be retried by hand with "{{DESKTOP:重试}}".
+
+Select any clip to view, edit, or "{{DESKTOP:复制本段}}" it; "{{DESKTOP:复制全部}}" joins all
+finished clips in recording order. When the list gets long, select several and click
+"{{DESKTOP:移除所选}}" (or press Delete), or click "{{DESKTOP:清除已完成}}". This only removes
+them from the list: files in `transcripts/` are not deleted, and text you edited in the window
+is written back to its transcript file first. Clips that are transcribing or queued cannot be
+removed.
+
+Each transcript is also saved locally in `transcripts/`. Recordings are kept in `recordings/`
+until they are transcribed; once the text is written to `transcripts/`, the recording is
+deleted automatically. Recordings that failed to transcribe are kept so they can be retried.
+Both folders are ignored by Git.
+
+The double-click install above is recommended. If you already have a Python virtual
+environment, you can install the desktop app by hand for development:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -e ".[gui]"
 ```
 
-以后可以直接双击项目里的 `Start Dictation.cmd`，或运行：
+Afterwards, double-click `Start Dictation.cmd` in the project, or run:
 
 ```powershell
 .\.venv\Scripts\gemini-live-gui.exe
 ```
 
-如果已有 `.env`，界面会显示“已从本机读取”；成功转写后才显示“本次转写已成功验证”。
-也可以在界面中粘贴新 key 并点击“保存 Key”。点击“查看 / 编辑词库”可以检查并修改
-当前选中的 `.txt` 词库文件：词条按首字母竖向排列，输入新词时会即时筛选并提示是否重复
-（不区分大小写），双击可修改，选中后按 Delete 删除。转写时，音频和个人词库中的词条会发送给 Gemini。
-点击“选择词库文件”可以改用 Google Drive 桌面版同步到电脑的那份 `.txt` 文件。保存前会检查文件是否被其他设备改过；每次开始录音都会重新读取。桌面版使用 Drive 桌面版的同步文件路径，需在电脑上安装并登录 Google Drive 桌面版。词库文件不会随网站发布。
-麦克风列表只显示当前可打开的设备，并将重复的驱动入口合并。
-界面默认选择 `VERBATIM`，因为它会保留口述中的纠正；需要更整洁的文字时可切换到 `SMART`。
-Live 单次会话的官方上限为 10 分钟，界面把录音限制在 8 分 30 秒并自动停止，给连接和
-收尾留出余量。超过这个长度可分段录制；也可以切换到普通 `gemini-3.5-transcribe`，
-本程序最多录 20 分钟，但普通版的请求受账号额度限制。Live 虽然在用户当前的免费额度
-截图中显示不限制每分钟和每天请求数，仍受每分钟 token 和单次会话时长限制。
+If a `.env` file exists, the window shows that the key was read from this computer; it shows
+it as verified only after a successful transcription. You can also paste a new key in the
+window and click "{{DESKTOP:保存 Key}}". Click "{{DESKTOP:查看 / 编辑词库}}" to review and edit
+the selected `.txt` vocabulary file: terms are listed alphabetically in columns, typing a new
+term filters the list and warns about duplicates (case-insensitive), double-click a term to
+edit it, and select one and press Delete to remove it. When transcribing, the audio and the
+terms in your personal vocabulary are sent to Gemini.
 
-## 网页版（手机、平板、任何浏览器）
+Click "{{DESKTOP:选择词库文件}}" to use the `.txt` file that Google Drive for desktop syncs to
+this computer. Before saving, the app checks whether another device changed the file; it is
+read again every time you start recording. The desktop app uses Drive for desktop's synced
+file path, so Drive for desktop must be installed and signed in. The vocabulary file is never
+published with the website.
 
-`web/` 是同一套流程的网页版，不需要安装：先在设备上录音，结束后整段交给 Live 转写，
-可以连续录多段，排队、限流重试和桌面版一样。网页是纯静态文件，推送到 `main` 后由
-GitHub Actions 发布到 GitHub Pages。点击“查看 / 编辑词库”可在网页编辑个人词库。未连接 Google Drive 时，词库保存在当前浏览器；此前网页版缓存的词条会在首次打开新版时迁移到本机词库。连接 Drive 后，网页会在每次录音或导入音频前读取所选云端 `.txt` 文件，并可把编辑结果保存回同一文件。浏览器每次重新打开后需要重新授权；授权失败时不会用旧词库静默转写。
+The microphone list only shows devices that can currently be opened, with duplicate driver
+entries merged. `VERBATIM` is selected by default because it keeps the corrections you make
+while speaking; switch to `SMART` for tidier text. A single Live session is officially limited
+to 10 minutes, so the app limits a recording to 8 minutes 30 seconds and stops automatically,
+leaving room for connecting and finishing. Record longer content in several clips, or switch
+to the regular `gemini-3.5-transcribe`, which this app allows up to 20 minutes per recording,
+though regular requests count against your account's quota. Live's free tier currently shows
+no per-minute or per-day request limit, but it is still subject to per-minute token limits and
+the session length limit.
 
-### 网页连接 Google Drive 词库
+## Web app (phones, tablets, any browser)
 
-1. 在 [Google Cloud Console](https://console.cloud.google.com/) 建立项目，启用 **Google Drive API** 和 **Google Picker API**，配置 OAuth 同意屏幕；如果应用仍处于测试状态，把自己的 Google 账号加入测试用户。
-2. 建立 **Web application** OAuth 客户端，把网页的来源（例如 `https://<用户名>.github.io`，本地预览还需 `http://localhost:8765`）加入 Authorized JavaScript origins。建立 API key，并记录 Cloud **项目编号**。若限制 API key 的网站来源，按 Google Picker 文档同时允许网页来源和 `https://docs.google.com/*`；若限制 API，允许 Picker API 和 Drive API。
-3. 打开网页的“查看 / 编辑词库 → 连接 Google Drive 词库”，填入客户端 ID、API key 和项目编号，点击“选择 Drive 词库”，登录后选中安卓使用的同一份 `.txt` 文件。授权范围是 `drive.file`。这些公开的网页配置保存在当前浏览器；访问令牌只放在页面内存中，不上传到本站服务器。
-4. 如已有浏览器本地词库，先把词条复制到 Drive 文件里，再切换。切换不会自动合并两份词库。保存时会先对比云端文件，发现其他设备改过会要求重新读取，避免直接覆盖。Google Drive API 的读取与写入不是一个原子事务，极短时间内的同时写入仍可能冲突。
+`web/` is the same workflow as a web page, with nothing to install: record on the device,
+then hand the whole recording to Live. You can record several clips in a row; queueing and
+rate-limit retries work as in the desktop app. The site is plain static files; pushing to
+`main` publishes it to GitHub Pages through GitHub Actions.
 
-Google 官方说明：[网页授权](https://developers.google.com/identity/oauth2/web/guides/use-token-model)、[Google Picker](https://developers.google.com/workspace/drive/picker/guides/web-picker)、[Drive 文件更新](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/update)。
+Click "View / edit vocabulary" to edit your personal vocabulary in the page. Without Google
+Drive, the vocabulary is stored in the current browser (terms cached by older versions are
+moved into it the first time the new version opens). With Drive connected, the page reads the
+selected `.txt` file before every recording or audio import and can save your edits back to
+the same file. The browser needs permission again each time it is reopened; if authorization
+fails, it will not quietly transcribe with an old vocabulary.
 
-- **API key**：网页代码里没有 key。每台设备第一次打开时从 Bitwarden 粘贴一次，只存在
-  那个浏览器的本地存储里；音频从设备直接发给 Google，中间没有别的服务器。
-- **录音**：只在转写完成前暂存在浏览器（IndexedDB），转写成功后自动删除；失败的段落保留
-  录音以便重试，点“移除”即删除。放弃的段落不保存。
-- **文字**：保留在这个浏览器里，可以修改、复制本段或复制全部，点“清除已完成”删除。
-- 也可以用“导入音频”转写设备上已有的录音文件（每段不超过 08:30）。
-- 转写时请让页面保持在前台：手机锁屏或切换应用时，浏览器可能暂停录音和发送。
-- 在 iPhone / iPad 的 Safari 里选“分享 → 添加到主屏幕”，之后可以像 App 一样打开。
+### Connecting the web app to a Google Drive vocabulary
 
-首次发布需要在 GitHub 上做两件事：仓库设为 public（免费账号的 Pages 要求），并在
-Settings → Pages → Build and deployment 中把 Source 设为 **GitHub Actions**。网址是
-`https://<用户名>.github.io/gemini-dictation/`。
+1. In the [Google Cloud Console](https://console.cloud.google.com/), create a project, enable
+   the **Google Drive API** and **Google Picker API**, and configure the OAuth consent screen;
+   while the app is in testing, add your own Google account as a test user.
+2. Create a **Web application** OAuth client and add the page's origin (e.g.
+   `https://<username>.github.io`, plus `http://localhost:8765` for local preview) to
+   Authorized JavaScript origins. Create an API key and note the Cloud **project number**. If
+   you restrict the API key by website, allow both the page's origin and
+   `https://docs.google.com/*`, as the Google Picker docs describe; if you restrict it by API,
+   allow the Picker API and the Drive API.
+3. In the page, open "View / edit vocabulary → Connect a Google Drive vocabulary", enter the
+   client ID, API key, and project number, click "Choose Drive vocabulary", sign in, and select
+   the same `.txt` file the Android keyboard uses. The scope is `drive.file`. This public web
+   configuration is stored in the current browser; the access token stays in page memory and
+   is never uploaded to this site's server.
+4. If you already have a browser-local vocabulary, copy its terms into the Drive file before
+   switching; switching does not merge the two. Before saving, the page compares the file in
+   Drive and asks you to reload it if another device changed it, instead of overwriting.
+   Reading and writing through the Google Drive API is not one atomic transaction, so writes
+   within a very short time of each other can still conflict.
 
-本地预览：在项目根目录运行 `.\.venv\Scripts\python.exe -m http.server 8765 --bind 127.0.0.1`，
-然后打开 `http://localhost:8765/web/`（localhost 可以使用麦克风）。
+Google's documentation: [web authorization](https://developers.google.com/identity/oauth2/web/guides/use-token-model),
+[Google Picker](https://developers.google.com/workspace/drive/picker/guides/web-picker),
+[updating Drive files](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/update).
 
-## 命令行 Live 实验
+- **API key**: the page's code contains no key. Paste it once on each device (e.g. from
+  Bitwarden); it is kept only in that browser's local storage. Audio goes straight from the
+  device to Google with no other server in between.
+- **Recordings**: kept in the browser (IndexedDB) only until they are transcribed, then
+  deleted automatically. Failed clips keep their recording so they can be retried; "Remove"
+  deletes it. Discarded clips are not saved.
+- **Text**: stays in this browser; you can edit it, "Copy clip" or "Copy all", and
+  "Clear finished" deletes it.
+- "Import audio" transcribes recording files already on the device (up to 08:30 each).
+- Keep the page in the foreground while transcribing: when the phone locks or you switch apps,
+  the browser may pause recording and sending.
+- In Safari on iPhone / iPad, choose "Share → Add to Home Screen" to open it like an app.
+
+The first deployment needs two settings on GitHub: make the repository public (Pages requires
+this on free accounts), and under Settings → Pages → Build and deployment, set Source to
+**GitHub Actions**. The address is `https://<username>.github.io/gemini-dictation/`.
+
+Local preview: in the project root run
+`.\.venv\Scripts\python.exe -m http.server 8765 --bind 127.0.0.1`, then open
+`http://localhost:8765/web/` (the microphone works on localhost).
+
+## Command-line Live experiment
 
 The separate command-line tool streams microphone audio to `gemini-3.5-transcribe-live`.
 It streams 16 kHz mono microphone audio to Gemini and prints both interim and finalized
@@ -172,7 +275,7 @@ again to start a new session; the `--output` file can be reused to append final 
 To compare Live with a previous transcription of a saved recording:
 
 ```powershell
-gemini-live-dictation --file "C:\Users\ustcy\Documents\test.m4a" --vocabulary config\vocabulary.txt --mode SMART --output transcripts\live-test.txt
+gemini-live-dictation --file "C:\path\to\recording.m4a" --vocabulary config\vocabulary.txt --mode SMART --output transcripts\live-test.txt
 ```
 
 The file is decoded locally and streamed at its original speed. Only final text is saved;
@@ -180,6 +283,8 @@ the audio file is never copied into this repository.
 
 ## Next steps
 
-1. 在真实 Windows 电脑上试一段短录音，确认麦克风和转写正常。
-2. 在 Android 实体手机上验证安装、输入法切换、语音输入和 Drive 词库读写。
-3. 调整个人词库，并在多台设备上检查同步效果。
+1. Try a short recording on a real Windows computer to confirm the microphone and
+   transcription work.
+2. Verify installation, keyboard switching, voice input, and Drive vocabulary reads and writes
+   on a physical Android phone.
+3. Tune the personal vocabulary and check that it syncs across devices.

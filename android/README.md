@@ -1,24 +1,95 @@
-# Android 语音输入法（首个测试版）
+# Android voice keyboard (first test build)
 
-这是 Android 系统输入法，不是主屏幕网页快捷方式。点击麦克风开始录音，再点一次结束；整段录音在本机暂存，完成后发送给 Gemini Live，最终文字写入当前输入框。密码输入框禁用语音。
+This is an Android system keyboard (input method), not a home-screen web shortcut. Tap the
+microphone to start recording and tap again to stop; the whole recording is kept on the phone,
+then sent to Gemini Live, and the final text is typed into the current text field. Voice input
+is disabled in password fields. The keyboard shows English, or Chinese when the phone's
+language is Chinese.
 
-录音结束后可以直接锁屏、放下手机、拉下通知栏或切到别的 App，转写会在后台继续，通知栏显示“正在转写录音”。如果录音中途屏幕熄灭或键盘被收起，录音会在那一刻结束并照常转写，已经说的话不会丢；不想要这段时点“× 放弃本段”。完成时如果还在原来的输入框（例如只是拉下了通知栏），文字会直接写进去；如果锁过屏或换过输入框，键盘会显示“转写完成，尚未输入”和文字开头，点“插入文字”写入当前输入框。转写失败时录音保留在手机上，点“↻ 重试”重新发送，不需要重录。处理完上一段（插入、重试成功或点两次“丢弃”）后才能录下一段。
+After you stop recording, you can lock the screen, put the phone down, pull down the
+notification shade, or switch to another app: transcription continues in the background and
+the notification shade shows "Transcribing recording". If the screen turns off or the keyboard
+hides while you are still recording, the recording ends at that moment and is transcribed as
+usual, so nothing you already said is lost; tap "× Drop recording" if you don't want the clip.
+When it finishes, if you are still in the same text field (for example you only pulled down
+the notification shade), the text is typed in directly. If you locked the screen or switched
+fields in between, the keyboard shows "Transcript ready, not typed yet" with the start of the
+text; tap "Insert text" to type it into the current field. If transcription fails, the
+recording stays on the phone: tap "↻ Retry" to send it again without re-recording. You can
+record the next clip once the previous one is handled (inserted, retried successfully, or
+discarded by tapping "Discard" twice).
 
-## 构建与安装
+## Build and install
 
-推送 Android 改动到 `main` 后，GitHub Actions 的 **Build Android keyboard** 会构建可安装的调试 APK，并把 `app-debug.apk` 作为 GitHub 预发布版本的单独文件提供。手机可以直接点击 APK 下载，不需要解压。这个 APK 用于个人测试；尚未制作正式签名版本，也尚未在实体手机上验证。
+When Android changes are pushed to `main`, the **Build Android keyboard** GitHub Actions
+workflow builds an installable debug APK and publishes `app-debug.apk` as a standalone file on
+a GitHub pre-release. On the phone, tap the APK to download it; no unzipping needed. The APK
+is for personal testing: there is no release-signed build yet, and it has not been verified on
+a physical phone. Each build is signed with a fresh debug key, so if Android refuses to update
+over an older install ("conflicts with an existing package"), uninstall the old version first;
+you will need to save the key, pick the vocabulary file, and enable the keyboard again.
 
-若在本机开发，安装 Android SDK 35、JDK 17 和 Gradle 8.9，在 `android/` 运行 `gradle :app:assembleDebug`。也可以先运行 `gradle :wrapper --gradle-version 8.9` 生成 Gradle Wrapper，再用 Android Studio 打开项目。项目使用 Android Gradle Plugin 8.7.0。APK 在 `app/build/outputs/apk/debug/`。
+For local development, install Android SDK 35, JDK 17, and Gradle 8.9, then run
+`gradle :app:assembleDebug` in `android/`. You can also run
+`gradle :wrapper --gradle-version 8.9` to generate a Gradle Wrapper and open the project in
+Android Studio. The project uses Android Gradle Plugin 8.7.0. The APK is in
+`app/build/outputs/apk/debug/`.
 
-安装后打开“Gemini 语音输入”：
+After installing, open "Gemini Voice Input":
 
-1. 授权麦克风，从 Bitwarden 粘贴自己的 Gemini API Key 并保存。Key 经 Android Keystore 加密后仅留在手机，不会上传 Drive。
-2. 可以先把电脑上的 `config/vocabulary.txt` 上传到 Google Drive。点“选择已有词库文件”或“在 Google Drive 新建词库文件”，在系统文件选择器里进入 Google Drive 并选择目标位置和 `.txt` 文件。应用持有该文件的长期读写授权，不需要访问整个网盘。
-3. 每次输入一个新词条，点“添加并保存”（或键盘完成键）后，它会立即出现在按字母和拼音排序的列表里，并自动写入所选 Drive 文件；以“词库已保存到 Drive”的提示为准。保存失败会提示原因，修改仍在当前列表中，可以点“保存修改到 Drive”重试；离开设置页后已经开始的保存也会继续执行。列表有常驻滚动条，可以直接在列表中上下滑动，也可以拖动右侧滑块快速浏览；点词条修改，长按删除，修改和删除后需要点“保存修改到 Drive”；添加时也会一并保存此前的修改。原文件中 `#` 开头的注释会保留。如果别的设备改过文件，保存会要求你先重新读取，避免覆盖。每次结束录音后，输入法会重新读取这份文件。
-4. 点“启用 Gemini 语音输入”，再点“选择当前输入法”。在任意普通文本框中点击麦克风使用。键盘顶部可切换“语音”“编辑”和“剪贴板”：编辑页提供上下左右移动光标、全选、复制和粘贴（粘贴最近复制的一条），密码框不能复制。剪贴板页按时间列出最近复制的文字，最多 50 条，超过后自动删掉最早的；在任意 App 里复制的文字（使用本键盘时），以及编辑页“复制”的文字，都会进入这里；每段语音转写写入输入框后也会存一份，万一文字插错地方或被删掉，可以从这里找回。同样的文字再复制会移到最上面。点一条直接粘贴到当前输入框，长按删除一条，“清空”需点两次确认。密码管理器（如 Bitwarden）标记为敏感的复制内容不会记录；如果某条不该保留，长按删除，系统剪贴板里还是这段文字时也会一并清除。剪贴板记录只保存在本应用的私有存储里，不上传、不参与备份，单条超过 10 万字的复制不记录。需要普通键盘时点地球图标切回三星键盘。
+1. Allow the microphone, paste your own Gemini API key (e.g. from Bitwarden), and save it. The
+   key is encrypted with the Android Keystore and stays on the phone; it is never uploaded to
+   Drive.
+2. Optionally upload `config/vocabulary.txt` from your computer to Google Drive first. Tap
+   "Choose existing vocabulary file" or "Create vocabulary file in Google Drive", open Google
+   Drive in the system file picker, and choose the location and `.txt` file. The app keeps
+   long-term read/write access to that one file and never needs access to your whole Drive.
+3. Type one new term at a time and tap "Add & save" (or the keyboard's Done key). It appears
+   immediately in the list, sorted alphabetically and by pinyin, and is written to the
+   selected Drive file; the "Vocabulary saved to Drive" message confirms it. If saving fails,
+   the reason is shown and your changes stay in the list; tap "Save changes to Drive" to
+   retry. A save that has started keeps running after you leave the settings screen. The list
+   has a permanent scrollbar: swipe the list or drag the handle on the right to move quickly.
+   Tap a term to edit it and long-press to delete it; after editing or deleting, tap "Save
+   changes to Drive" (adding a term also saves earlier changes). Comment lines starting with
+   `#` in the file are kept. If another device changed the file, saving asks you to reload it
+   first instead of overwriting. The keyboard reads the file again after every recording.
+4. Tap "Enable Gemini Voice Input", then "Choose current keyboard". Tap the microphone in any
+   normal text field to use it.
 
-录音在转写完成前暂存在本应用的私有存储里（其他 App 无法读取，不参与备份），转写文字在写入输入框前也暂存在那里；文字写入输入框或点“丢弃”后，两者都会删除（写入的文字会另存一份在剪贴板记录里，可长按删除）。词库只通过你选中的文件读写；如果 Drive 暂时不可用，转写会显示读取失败，重新联网后再试。当前语音模式固定为 `VERBATIM`，单段最长 8 分 30 秒。
+The tabs at the top of the keyboard switch between "Voice", "Edit", and "Clipboard":
 
-结束录音后，键盘显示进度条、当前阶段（读取词库、连接 Gemini、发送音频、等待转写）和累计等待时间，完成后显示总耗时。发送阶段的百分比表示音频已提交到网络发送队列的比例；队列未发完时会继续显示上传状态。读取、连接和 Gemini 处理阶段显示循环进度条，不估算整体完成百分比。当前流程在录音结束后才连接并发送音频，前 15 秒音频快速提交，其余部分按约 4 倍录音速度提交，因此较长录音仍会有实际等待时间。
+- **Edit** has cursor keys, "Select all", "Copy", and "Paste" (pastes the most recent copy).
+  Password fields cannot be copied from.
+- **Clipboard** lists recently copied text, newest first, up to 50 items; beyond that the
+  oldest is dropped. It collects text copied in any app while this keyboard is in use, text
+  copied with "Copy" on the Edit tab, and every transcript after it is typed in, so if text
+  lands in the wrong place or gets deleted you can get it back here. Copying the same text
+  again moves it to the top. Tap an item to paste it into the current field, long-press to
+  delete it; "Clear" needs a second tap to confirm. Copies that password managers (such as
+  Bitwarden) mark as sensitive are never recorded. If an item shouldn't be kept, long-press to
+  delete it; if the system clipboard still holds that text, it is cleared too. The history is
+  stored only in the app's private storage: it is not uploaded or backed up, and a single copy
+  over 100,000 characters is not recorded.
+- To use a regular keyboard, tap the globe key to switch back to, e.g., the Samsung keyboard.
 
-网页版可通过 Google 授权和 Drive 文件选择器读取同一份文件；需要先按根目录 README 配置 Google Cloud 网页凭据。Windows 桌面版可以选择 Google Drive 桌面版同步到电脑的这份 `.txt` 文件。
+Until a recording is transcribed, it is kept in the app's private storage (other apps cannot
+read it, and it is excluded from backups); the transcript is kept there too until it is typed
+in. Once the text is typed in or you tap "Discard", both are deleted (a typed transcript is
+also kept in the clipboard history, where you can long-press to delete it). The vocabulary is
+only read and written through the file you picked; if Drive is temporarily unavailable,
+transcription reports a read failure; try again once you are back online. The voice mode is
+currently fixed to `VERBATIM`, and a clip can be up to 8 minutes 30 seconds long.
+
+After you stop recording, the keyboard shows a progress bar, the current stage (reading the
+vocabulary, connecting to Gemini, sending audio, waiting for the transcript), and the time
+waited so far, and the total time when done. During sending, the percentage is the share of
+audio handed to the network send queue; while the queue is still draining, it keeps showing
+the upload status. Reading, connecting, and Gemini processing show an indeterminate progress
+bar without estimating overall completion. Audio is only connected and sent after recording
+ends: the first 15 seconds are submitted quickly and the rest at about 4× recording speed, so
+longer recordings still involve a real wait.
+
+The web app can read the same file through Google sign-in and the Drive file picker; first set
+up Google Cloud web credentials as described in the root README. The Windows desktop app can
+use the copy of this `.txt` file that Google Drive for desktop syncs to the computer.
