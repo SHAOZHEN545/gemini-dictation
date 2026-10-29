@@ -332,6 +332,8 @@ public final class VoiceInputService extends InputMethodService implements Dicta
             return;
         }
         String elapsed = seconds(job.finishedMillis);
+        // Keep a copy in the clipboard history in case the text field loses it later.
+        addToClipboardHistory(job.pendingText);
         job.delivered();
         show(automatic ? "已输入文字 · 耗时 " + elapsed + " · 点击麦克风可继续"
                 : "已插入转写文字 · 点击麦克风可继续");
