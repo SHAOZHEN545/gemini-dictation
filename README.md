@@ -20,11 +20,11 @@ Works on 64-bit Intel / AMD PCs with Windows 10 / 11:
    downloads a private Python runtime, installs the desktop and audio components, creates a
    desktop shortcut, and opens the app. The first install needs internet access and can take
    a few minutes; no commands, preinstalled Python, or administrator rights are needed.
-3. Paste your own **Gemini API key** in the app and click "{{DESKTOP:保存 Key}}". Each new
+3. Paste your own **Gemini API key** in the app and click "Save key". Each new
    computer needs the key again; the GitHub repository never carries keys from other
    computers.
 4. To use a cloud vocabulary, install and sign in to **Google Drive for desktop**, then click
-   "{{DESKTOP:选择词库文件}}" in the app and pick the `.txt` file Drive syncs to this computer.
+   "Choose vocabulary file" in the app and pick the `.txt` file Drive syncs to this computer.
    You can also start with a local vocabulary.
 
 After that, double-click **Gemini Dictation** on the desktop or **`Start Dictation.cmd`** in
@@ -71,7 +71,7 @@ and usage: [Android guide](android/README.md).
 ## Desktop app (Windows)
 
 The desktop app has a local window. Choose `VERBATIM` or `SMART`, pick a microphone, click
-"{{DESKTOP:开始录音}}", speak, then click "{{DESKTOP:结束录音}}". While recording, audio stays
+"Start recording", speak, then click "Stop and submit". While recording, audio stays
 on this computer: nothing is sent to Gemini and no partial transcript is shown. The default
 model is `gemini-3.5-transcribe-live`: after you stop, the app turns off Live's automatic
 segmentation and sends the whole recording as one "utterance" at about 4× speed (Live itself
@@ -82,9 +82,9 @@ about a quarter of the recording length (a 1-minute recording takes about 15–2
 level meter only shows the local microphone input level.
 
 You don't have to wait for a transcript before recording again: click
-"{{DESKTOP:结束并提交}}" and start the next clip right away, or click
-"{{DESKTOP:提交，录下一段}}" while recording to do both in one step. If you don't like a clip,
-click "{{DESKTOP:× 放弃本段}}": the recording is dropped, not saved locally, and not sent to
+"Stop and submit" and start the next clip right away, or click
+"Submit, record next" while recording to do both in one step. If you don't like a clip,
+click "× Discard": the recording is dropped, not saved locally, and not sent to
 Gemini.
 
 Each clip is a separate transcription job. The list on the left shows queued, sending
@@ -95,11 +95,11 @@ once with one key, 5–8 were accepted and the rest immediately returned
 app stops starting new jobs and retries automatically after the delay the server suggests (or
 10 / 30 / 60 seconds when it gives none), up to 4 times. Dropped connections are retried as
 well. Errors that retrying cannot fix, such as an invalid API key, are marked failed right
-away and can be retried by hand with "{{DESKTOP:重试}}".
+away and can be retried by hand with "Retry".
 
-Select any clip to view, edit, or "{{DESKTOP:复制本段}}" it; "{{DESKTOP:复制全部}}" joins all
+Select any clip to view, edit, or "Copy" it; "Copy all" joins all
 finished clips in recording order. When the list gets long, select several and click
-"{{DESKTOP:移除所选}}" (or press Delete), or click "{{DESKTOP:清除已完成}}". This only removes
+"Remove selected" (or press Delete), or click "Clear finished". This only removes
 them from the list: files in `transcripts/` are not deleted, and text you edited in the window
 is written back to its transcript file first. Clips that are transcribing or queued cannot be
 removed.
@@ -124,13 +124,13 @@ Afterwards, double-click `Start Dictation.cmd` in the project, or run:
 
 If a `.env` file exists, the window shows that the key was read from this computer; it shows
 it as verified only after a successful transcription. You can also paste a new key in the
-window and click "{{DESKTOP:保存 Key}}". Click "{{DESKTOP:查看 / 编辑词库}}" to review and edit
+window and click "Save key". Click "View / edit vocabulary" to review and edit
 the selected `.txt` vocabulary file: terms are listed alphabetically in columns, typing a new
 term filters the list and warns about duplicates (case-insensitive), double-click a term to
 edit it, and select one and press Delete to remove it. When transcribing, the audio and the
 terms in your personal vocabulary are sent to Gemini.
 
-Click "{{DESKTOP:选择词库文件}}" to use the `.txt` file that Google Drive for desktop syncs to
+Click "Choose vocabulary file" to use the `.txt` file that Google Drive for desktop syncs to
 this computer. Before saving, the app checks whether another device changed the file; it is
 read again every time you start recording. The desktop app uses Drive for desktop's synced
 file path, so Drive for desktop must be installed and signed in. The vocabulary file is never
