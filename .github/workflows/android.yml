@@ -47,6 +47,6 @@ jobs:
           gh release create "android-test-${GITHUB_RUN_NUMBER}" app-debug.apk \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Android 语音输入法测试版 #${GITHUB_RUN_NUMBER}" \
-            --notes "可直接下载 app-debug.apk 安装。此版本已通过自动编译，尚未在实体手机上验证；用自己的 Gemini API Key，词库只授权所选的 Drive 文件。" \
+            --title "Android voice keyboard test build #${GITHUB_RUN_NUMBER}" \
+            --notes "Download and install app-debug.apk directly. This build passed automated compilation but has not been verified on a physical phone. It uses your own Gemini API key and only gets access to the vocabulary file you pick in Drive." \
             --prerelease

@@ -15,7 +15,8 @@ public final class VocabularyDraftTest {
         assertEquals(Arrays.asList("Alpha", "beta", "Gamma", "zeta", "中文"), draft.terms());
         draft.replace("zeta", "Aardvark");
         assertEquals("# Private terms\nAardvark\nAlpha\nbeta\nGamma\n中文\n", draft.serialize());
-        assertThrows(IllegalArgumentException.class, () -> draft.add("alpha"));
+        assertEquals(R.string.error_term_exists,
+                assertThrows(VocabularyDraft.InvalidTermException.class, () -> draft.add("alpha")).messageId);
     }
 
     @Test public void rejectsInvalidTermsAndPreservesEmptyFile() {

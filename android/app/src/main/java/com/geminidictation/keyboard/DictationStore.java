@@ -22,7 +22,7 @@ final class DictationStore {
     void saveAudio(byte[] pcm) throws IOException { write(audio, pcm); }
 
     byte[] readAudio() throws IOException {
-        if (!audio.isFile()) throw new IOException("录音文件已不存在，请重新录音");
+        if (!audio.isFile()) throw new IOException("Recording file no longer exists");
         return Files.readAllBytes(audio.toPath());
     }
 
@@ -54,7 +54,7 @@ final class DictationStore {
         }
         if (!temporary.renameTo(target)) {
             temporary.delete();
-            throw new IOException("无法保存 " + target.getName());
+            throw new IOException("Could not save " + target.getName());
         }
     }
 }

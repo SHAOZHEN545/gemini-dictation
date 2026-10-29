@@ -8,6 +8,13 @@ import java.util.Locale;
 
 /** Editable view of one vocabulary file. Comments survive edits; terms are saved in sorted order. */
 final class VocabularyDraft {
+    /** A rejected edit. Carries a string resource id so this class stays free of Android APIs. */
+    static final class InvalidTermException extends IllegalArgumentException {
+        final int messageId;
+
+        InvalidTermException(int messageId) { this.messageId = messageId; }
+    }
+
     private final List<String> comments = new ArrayList<>();
     private final List<String> terms = new ArrayList<>();
 
@@ -17,7 +24,7 @@ final class VocabularyDraft {
             if (value.startsWith("#")) comments.add(line);
             else if (!value.isEmpty() && !containsIgnoreCase(value, null)) terms.add(value);
         }
-        if (terms.size() > 1000) throw new IllegalArgumentException("Gemini 最多接受 1000 个词条");
+        if (terms.size() > 1000) throw new InvalidTermException(R.string.error_term_limit);
         sort();
     }
 
@@ -25,16 +32,16 @@ final class VocabularyDraft {
 
     void add(String input) {
         String value = clean(input);
-        if (containsIgnoreCase(value, null)) throw new IllegalArgumentException("词库里已经有这个词条");
-        if (terms.size() >= 1000) throw new IllegalArgumentException("Gemini 最多接受 1000 个词条");
+        if (containsIgnoreCase(value, null)) throw new InvalidTermException(R.string.error_term_exists);
+        if (terms.size() >= 1000) throw new InvalidTermException(R.string.error_term_limit);
         terms.add(value);
         sort();
     }
 
     void replace(String old, String input) {
-        if (!terms.contains(old)) throw new IllegalArgumentException("找不到要修改的词条");
+        if (!terms.contains(old)) throw new InvalidTermException(R.string.error_term_not_found);
         String value = clean(input);
-        if (containsIgnoreCase(value, old)) throw new IllegalArgumentException("词库里已经有这个词条");
+        if (containsIgnoreCase(value, old)) throw new InvalidTermException(R.string.error_term_exists);
         terms.set(terms.indexOf(old), value);
         sort();
     }
@@ -58,7 +65,7 @@ final class VocabularyDraft {
     private static String clean(String input) {
         String value = input.trim();
         if (value.isEmpty() || value.startsWith("#") || value.contains("\n") || value.contains("\r"))
-            throw new IllegalArgumentException("请输入一个非空词条，不要包含换行或以 # 开头");
+            throw new InvalidTermException(R.string.error_term_invalid);
         return value;
     }
 

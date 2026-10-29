@@ -10,7 +10,7 @@
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
-        android:label="Gemini 语音输入"
+        android:label="@string/app_name"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
         <activity
@@ -25,7 +25,7 @@
         <service
             android:name=".VoiceInputService"
             android:exported="true"
-            android:label="Gemini 语音输入"
+            android:label="@string/app_name"
             android:permission="android.permission.BIND_INPUT_METHOD">
             <intent-filter>
                 <action android:name="android.view.InputMethod" />

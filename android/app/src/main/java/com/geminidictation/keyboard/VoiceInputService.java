@@ -120,7 +120,7 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         status = new TextView(this);
         status.setTextColor(Color.WHITE);
         status.setTextSize(15);
-        status.setText("点击麦克风开始录音");
+        status.setText(R.string.status_idle);
         body.addView(status);
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setMax(100);
@@ -135,9 +135,9 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         LinearLayout tabs = new LinearLayout(this);
         tabs.setGravity(Gravity.CENTER_VERTICAL);
         body.addView(tabs);
-        voiceTab = key(tabs, "🎙 语音", 2, () -> showPanel(PANEL_VOICE));
-        editTab = key(tabs, "✎ 编辑", 2, () -> showPanel(PANEL_EDIT));
-        clipboardTab = key(tabs, "📋 剪贴板", 2, () -> showPanel(PANEL_CLIPBOARD));
+        voiceTab = key(tabs, getString(R.string.tab_voice), 2, () -> showPanel(PANEL_VOICE));
+        editTab = key(tabs, getString(R.string.tab_edit), 2, () -> showPanel(PANEL_EDIT));
+        clipboardTab = key(tabs, getString(R.string.tab_clipboard), 2, () -> showPanel(PANEL_CLIPBOARD));
         key(tabs, "🌐", 1, () -> {
             if (shouldOfferSwitchingToNextInputMethod()) switchToNextInputMethod(false);
             else ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).showInputMethodPicker();
@@ -148,7 +148,7 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         voicePanel.setGravity(Gravity.CENTER_VERTICAL);
         body.addView(voicePanel);
         LinearLayout row = voicePanel;
-        microphone = key(row, "🎙 录音", 2, this::toggleRecording);
+        microphone = key(row, getString(R.string.key_record), 2, this::toggleRecording);
         Button delete = key(row, "⌫", 1, () -> {
             if (!suppressDeleteClick) deleteOnce();
         });
@@ -173,8 +173,8 @@ public final class VoiceInputService extends InputMethodService implements Dicta
             }
             return deleting;
         });
-        key(row, "空格", 1, () -> commit(" "));
-        key(row, "换行", 1, this::enter);
+        key(row, getString(R.string.key_space), 1, () -> commit(" "));
+        key(row, getString(R.string.key_enter), 1, this::enter);
 
         editPanel = new LinearLayout(this);
         editPanel.setOrientation(LinearLayout.VERTICAL);
@@ -187,9 +187,9 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         key(arrows, "→", 1, () -> moveCursor(KeyEvent.KEYCODE_DPAD_RIGHT));
         LinearLayout actions = new LinearLayout(this);
         editPanel.addView(actions);
-        key(actions, "全选", 1, this::selectAll);
-        key(actions, "复制", 1, this::copyOnce);
-        pasteButton = key(actions, "粘贴", 1, this::pasteLatest);
+        key(actions, getString(R.string.key_select_all), 1, this::selectAll);
+        key(actions, getString(R.string.key_copy), 1, this::copyOnce);
+        pasteButton = key(actions, getString(R.string.key_paste), 1, this::pasteLatest);
 
         clipboardPanel = new LinearLayout(this);
         clipboardPanel.setOrientation(LinearLayout.VERTICAL);
@@ -202,7 +202,7 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         clipboardTitle.setTextSize(13);
         clipboardHeader.addView(clipboardTitle, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 3));
-        clearClipboardButton = key(clipboardHeader, "清空", 1, this::clearClipboardClicked);
+        clearClipboardButton = key(clipboardHeader, getString(R.string.key_clear), 1, this::clearClipboardClicked);
         ScrollView clipboardScroll = new ScrollView(this);
         clipboardScroll.setScrollbarFadingEnabled(false);
         clipboardList = new LinearLayout(this);
@@ -261,26 +261,26 @@ public final class VoiceInputService extends InputMethodService implements Dicta
             return;
         }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            show("请在设置中授权麦克风");
+            show(getString(R.string.status_need_mic_permission));
             openSettings();
             return;
         }
         try {
             if (SecureKeyStore.read(this).isEmpty()) {
-                show("请先从 Bitwarden 粘贴并保存 Gemini Key");
+                show(getString(R.string.status_need_key));
                 openSettings();
                 return;
             }
             PcmRecorder[] next = new PcmRecorder[1];
-            next[0] = new PcmRecorder((pcm, error) -> onRecorded(next[0], pcm, error));
+            next[0] = new PcmRecorder(this, (pcm, error) -> onRecorded(next[0], pcm, error));
             next[0].start();
             recorder = next[0];
             recordingSession = inputSession;
             confirmingDiscard = false;
-            show("正在录音 · 再点一次结束");
+            show(getString(R.string.status_recording));
             updateUi();
         } catch (Exception error) {
-            show("录音无法开始：" + error.getMessage());
+            show(getString(R.string.status_record_failed, error.getMessage()));
         }
     }
 
@@ -289,7 +289,7 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         PcmRecorder finished = recorder;
         recorder = null;
         finishingRecording = true;
-        show("正在结束录音");
+        show(getString(R.string.status_finishing));
         updateUi();
         finished.finish();
     }
@@ -298,7 +298,7 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         if (recorder == source) recorder = null;
         finishingRecording = false;
         if (error != null || pcm.length == 0) {
-            show(error == null ? "没有录到声音" : error);
+            show(error == null ? getString(R.string.error_no_sound) : error);
             updateUi();
             return;
         }
@@ -324,19 +324,19 @@ public final class VoiceInputService extends InputMethodService implements Dicta
     private void insertPending(boolean automatic) {
         InputConnection target = getCurrentInputConnection();
         if (!inputStarted || target == null || privateField) {
-            if (!automatic) show(privateField ? "密码输入框不能写入转写文字" : "请先点一个输入框");
+            if (!automatic)
+                show(getString(privateField ? R.string.status_private_no_insert : R.string.status_tap_field));
             return;
         }
         if (!target.commitText(job.pendingText, 1)) {
-            if (!automatic) show("当前输入框无法写入，文字仍保留");
+            if (!automatic) show(getString(R.string.status_insert_failed));
             return;
         }
         String elapsed = seconds(job.finishedMillis);
         // Keep a copy in the clipboard history in case the text field loses it later.
         addToClipboardHistory(job.pendingText);
         job.delivered();
-        show(automatic ? "已输入文字 · 耗时 " + elapsed + " · 点击麦克风可继续"
-                : "已插入转写文字 · 点击麦克风可继续");
+        show(automatic ? getString(R.string.status_typed, elapsed) : getString(R.string.status_inserted));
         updateUi();
     }
 
@@ -344,7 +344,7 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         if (recorder != null) {
             recorder.discard();
             recorder = null;
-            show("已放弃本段录音");
+            show(getString(R.string.status_dropped));
             updateUi();
             return;
         }
@@ -358,36 +358,35 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         confirmingDiscard = false;
         main.removeCallbacks(cancelDiscardConfirmation);
         job.discard();
-        show("已丢弃这段录音");
+        show(getString(R.string.status_discarded));
         updateUi();
     }
 
     /** Shows the job state; transient messages from other buttons stay until the next change. */
     private void refreshStatus() {
-        if (recorder != null) show("正在录音 · 再点一次结束");
-        else if (finishingRecording) show("正在结束录音");
+        if (recorder != null) show(getString(R.string.status_recording));
+        else if (finishingRecording) show(getString(R.string.status_finishing));
         else if (job.running) {
             main.removeCallbacks(progressTick);
             main.postDelayed(progressTick, 1000);
         } else if (job.pendingText != null) {
-            show("转写完成，尚未输入（" + job.pendingText.length() + " 字）：" + preview(job.pendingText)
-                    + " · 点「插入文字」写入当前输入框");
+            show(getString(R.string.status_pending, job.pendingText.length(), preview(job.pendingText)));
         } else if (job.audioKept) {
-            show((job.error == null ? "上次录音还没有转写完成" : "转写失败：" + job.error)
-                    + " · 录音已保存在手机上，可点「重试」");
-        } else if (job.error != null) show("转写失败：" + job.error);
-        else if (privateField) show("密码输入框已禁用语音");
-        else show("点击麦克风开始录音");
+            show(job.error == null ? getString(R.string.status_audio_unfinished)
+                    : getString(R.string.status_audio_failed, job.error));
+        } else if (job.error != null) show(getString(R.string.status_failed, job.error));
+        else if (privateField) show(getString(R.string.status_private_field));
+        else show(getString(R.string.status_idle));
         updateUi();
     }
 
-    private static String preview(String text) {
+    private String preview(String text) {
         String flat = text.replaceAll("\\s+", " ").trim();
-        return "「" + (flat.length() > 24 ? flat.substring(0, 24) + "…" : flat) + "」";
+        return getString(R.string.preview_quote, flat.length() > 24 ? flat.substring(0, 24) + "…" : flat);
     }
 
-    private static String seconds(long millis) {
-        return String.format(Locale.CHINA, "%.1f 秒", millis / 1000.0);
+    private String seconds(long millis) {
+        return String.format(Locale.ROOT, getString(R.string.seconds), millis / 1000.0);
     }
 
     private void renderProgress() {
@@ -395,9 +394,9 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         progressBar.setVisibility(View.VISIBLE);
         progressBar.setIndeterminate(job.percent < 0);
         if (job.percent >= 0) progressBar.setProgress(job.percent);
-        show(job.stage + (job.percent < 0 ? "" : " " + job.percent + "%")
-                + " · 已等待 " + seconds(SystemClock.elapsedRealtime() - job.started)
-                + " · 可锁屏或离开");
+        String waited = seconds(SystemClock.elapsedRealtime() - job.started);
+        show(job.percent < 0 ? getString(R.string.status_progress, job.stage, waited)
+                : getString(R.string.status_progress_percent, job.stage, job.percent, waited));
     }
 
     private boolean isPrivateField(int inputType) {
@@ -445,27 +444,27 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         ExtractedText extracted = target.getExtractedText(new ExtractedTextRequest(), 0);
         if (extracted != null && extracted.text != null && extracted.startOffset >= 0 &&
                 target.setSelection(extracted.startOffset, extracted.startOffset + extracted.text.length())) return;
-        show("当前输入框不支持全选");
+        show(getString(R.string.status_select_all_unsupported));
     }
 
     private void copyOnce() {
-        if (privateField) { show("密码输入框不能复制内容"); return; }
+        if (privateField) { show(getString(R.string.status_private_no_copy)); return; }
         InputConnection target = getCurrentInputConnection();
         if (target == null) return;
         CharSequence selected = target.getSelectedText(0);
         if (selected == null || selected.length() == 0) {
-            show("请先选中文字；可点“全选”");
+            show(getString(R.string.status_select_first));
             return;
         }
         String text = selected.toString();
         lastSystemClip = text;
         addToClipboardHistory(text);
         try {
-            clipboard.setPrimaryClip(ClipData.newPlainText("文字", text));
+            clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.clip_label), text));
         } catch (RuntimeException ignored) {
             // Still kept in the keyboard's clipboard history.
         }
-        show("已复制，可在「剪贴板」里再次粘贴");
+        show(getString(R.string.status_copied));
     }
 
     private void pasteLatest() {
@@ -475,9 +474,9 @@ public final class VoiceInputService extends InputMethodService implements Dicta
 
     private void pasteClip(String text) {
         InputConnection target = getCurrentInputConnection();
-        if (target == null) show("请先点一个输入框");
-        else if (target.commitText(text, 1)) show("已粘贴");
-        else show("当前输入框无法粘贴");
+        if (target == null) show(getString(R.string.status_tap_field));
+        else if (target.commitText(text, 1)) show(getString(R.string.status_pasted));
+        else show(getString(R.string.status_paste_failed));
     }
 
     private void recordSystemClip() {
@@ -510,7 +509,7 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         clipboardHistory.remove(index);
         forgetSystemClip(text);
         saveClipboardHistory();
-        show("已删除一条剪贴板记录");
+        show(getString(R.string.status_clip_deleted));
         renderClipboard();
         updateUi();
     }
@@ -528,7 +527,7 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         for (String item : clipboardHistory.items()) forgetSystemClip(item);
         clipboardHistory.clear();
         saveClipboardHistory();
-        show("剪贴板已清空");
+        show(getString(R.string.status_clipboard_cleared));
         renderClipboard();
         updateUi();
     }
@@ -548,8 +547,8 @@ public final class VoiceInputService extends InputMethodService implements Dicta
     private void renderClipboard() {
         if (clipboardList == null) return;
         List<String> items = clipboardHistory.items();
-        clipboardTitle.setText("最近复制 " + items.size() + "/" + ClipboardHistory.LIMIT + " · 点一下粘贴，长按删除");
-        clearClipboardButton.setText(confirmingClear ? "再点确认清空" : "清空");
+        clipboardTitle.setText(getString(R.string.clipboard_title, items.size(), ClipboardHistory.LIMIT));
+        clearClipboardButton.setText(confirmingClear ? R.string.key_confirm_clear : R.string.key_clear);
         clearClipboardButton.setEnabled(!items.isEmpty());
         clipboardList.removeAllViews();
         if (items.isEmpty()) {
@@ -557,8 +556,7 @@ public final class VoiceInputService extends InputMethodService implements Dicta
             empty.setTextColor(Color.rgb(200, 210, 228));
             empty.setTextSize(14);
             empty.setPadding(dp(4), dp(10), dp(4), dp(10));
-            empty.setText("还没有复制过文字。在任意 App 里复制后会出现在这里，最多保留最近 "
-                    + ClipboardHistory.LIMIT + " 条。");
+            empty.setText(getString(R.string.clipboard_empty, ClipboardHistory.LIMIT));
             clipboardList.addView(empty);
             return;
         }
@@ -638,15 +636,16 @@ public final class VoiceInputService extends InputMethodService implements Dicta
         if (microphone == null) return;
         microphone.setEnabled(recorder != null ||
                 !finishingRecording && !job.hasUnfinished() && !privateField);
-        microphone.setText(recorder == null ? "🎙 录音" : "■ 结束");
+        microphone.setText(recorder == null ? R.string.key_record : R.string.key_stop);
         if (pasteButton != null) pasteButton.setEnabled(!clipboardHistory.items().isEmpty());
         boolean saved = !job.running && (job.pendingText != null || job.audioKept);
         pendingPanel.setVisibility(recorder != null || job.running || saved ? View.VISIBLE : View.GONE);
         pendingAction.setVisibility(saved && recorder == null ? View.VISIBLE : View.GONE);
-        pendingAction.setText(job.pendingText != null ? "插入文字" : "↻ 重试");
+        pendingAction.setText(job.pendingText != null ? R.string.action_insert : R.string.action_retry);
         pendingAction.setEnabled(job.pendingText == null || !privateField);
-        if (recorder != null) discardButton.setText("× 放弃本段");
-        else discardButton.setText(confirmingDiscard ? "再点确认丢弃" : job.running ? "× 取消" : "丢弃");
+        if (recorder != null) discardButton.setText(R.string.action_drop_recording);
+        else discardButton.setText(confirmingDiscard ? R.string.action_confirm_discard
+                : job.running ? R.string.action_cancel : R.string.action_discard);
         if (job.running) renderProgress();
         else progressBar.setVisibility(View.GONE);
     }

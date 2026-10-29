@@ -1,5 +1,6 @@
 package com.geminidictation.keyboard;
 
+import android.content.Context;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
@@ -16,6 +17,7 @@ final class PcmRecorder {
 
     static final int SAMPLE_RATE = 16_000;
     static final int MAX_SECONDS = 510;
+    private final Context context;
     private final AudioRecord recorder;
     private final Callback callback;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -23,17 +25,18 @@ final class PcmRecorder {
     private volatile boolean discard;
     private Thread thread;
 
-    PcmRecorder(Callback callback) {
+    PcmRecorder(Context context, Callback callback) {
+        this.context = context;
         this.callback = callback;
         int minBytes = AudioRecord.getMinBufferSize(SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-        if (minBytes <= 0) throw new IllegalStateException("手机不支持 16 kHz 麦克风录音");
+        if (minBytes <= 0) throw new IllegalStateException(context.getString(R.string.error_mic_unsupported));
         recorder = new AudioRecord(MediaRecorder.AudioSource.MIC, SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
                 Math.max(minBytes, 6400));
         if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
             recorder.release();
-            throw new IllegalStateException("麦克风无法打开");
+            throw new IllegalStateException(context.getString(R.string.error_mic_open));
         }
     }
 
@@ -46,7 +49,7 @@ final class PcmRecorder {
         }
         if (recorder.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
             recorder.release();
-            throw new IllegalStateException("麦克风没有开始录音");
+            throw new IllegalStateException(context.getString(R.string.error_mic_not_started));
         }
         recording.set(true);
         thread = new Thread(() -> {
@@ -58,7 +61,7 @@ final class PcmRecorder {
                     int count = recorder.read(chunk, 0, chunk.length);
                     if (count < 0) {
                         if (!recording.get()) break;
-                        throw new IllegalStateException("麦克风读取失败：" + count);
+                        throw new IllegalStateException(context.getString(R.string.error_mic_read, count));
                     }
                     output.write(chunk, 0, count);
                 }

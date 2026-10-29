@@ -27,11 +27,11 @@ final class VocabularyStore {
 
     static void select(Context context, Intent result) {
         Uri uri = result.getData();
-        if (uri == null) throw new IllegalArgumentException("没有选中文件");
+        if (uri == null) throw new IllegalArgumentException(context.getString(R.string.error_no_file_selected));
         int flags = result.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
         if ((flags & Intent.FLAG_GRANT_READ_URI_PERMISSION) == 0 ||
                 (flags & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) == 0) {
-            throw new SecurityException("这个文件没有同时授予读写权限，请选择可编辑的文本文件");
+            throw new SecurityException(context.getString(R.string.error_file_not_read_write));
         }
         context.getContentResolver().takePersistableUriPermission(uri, flags);
         Uri old = selectedUri(context);
@@ -53,17 +53,18 @@ final class VocabularyStore {
     static String read(Context context, Uri uri) throws IOException {
         if (uri == null) return "";
         try (InputStream stream = context.getContentResolver().openInputStream(uri)) {
-            if (stream == null) throw new IOException("无法读取词库文件");
+            if (stream == null) throw new IOException(context.getString(R.string.error_vocabulary_unreadable));
             BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8));
             StringBuilder text = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) {
-                if (text.length() > 256_000) throw new IOException("词库文件过大");
+                if (text.length() > 256_000)
+                    throw new IOException(context.getString(R.string.error_vocabulary_too_large));
                 text.append(line).append('\n');
             }
             return text.toString();
         } catch (SecurityException error) {
-            throw new IOException("词库授权已失效，请重新选择文件", error);
+            throw new IOException(context.getString(R.string.error_vocabulary_access_expired), error);
         }
     }
 
@@ -72,25 +73,26 @@ final class VocabularyStore {
     }
 
     static void write(Context context, Uri uri, String text) throws IOException {
-        if (uri == null) throw new IOException("请先选择 Google Drive 中的词库文件");
-        if (text.getBytes(StandardCharsets.UTF_8).length > 256_000) throw new IOException("词库文件过大");
-        parse(text); // Do not replace a valid cloud file with an invalid list.
+        if (uri == null) throw new IOException(context.getString(R.string.error_choose_vocabulary_first));
+        if (text.getBytes(StandardCharsets.UTF_8).length > 256_000)
+            throw new IOException(context.getString(R.string.error_vocabulary_too_large));
+        parse(context, text); // Do not replace a valid cloud file with an invalid list.
         try (OutputStream stream = context.getContentResolver().openOutputStream(uri, "wt")) {
-            if (stream == null) throw new IOException("这个文件无法写入");
+            if (stream == null) throw new IOException(context.getString(R.string.error_file_not_writable));
             stream.write(text.getBytes(StandardCharsets.UTF_8));
             stream.flush();
         } catch (SecurityException error) {
-            throw new IOException("词库写入权限已失效，请重新选择文件", error);
+            throw new IOException(context.getString(R.string.error_vocabulary_write_expired), error);
         }
     }
 
-    static List<String> parse(String text) {
+    static List<String> parse(Context context, String text) {
         LinkedHashSet<String> unique = new LinkedHashSet<>();
         for (String line : text.split("\\R")) {
             String term = line.trim();
             if (!term.isEmpty() && !term.startsWith("#")) unique.add(term);
         }
-        if (unique.size() > 1000) throw new IllegalArgumentException("Gemini 最多接受 1000 个词条");
+        if (unique.size() > 1000) throw new IllegalArgumentException(context.getString(R.string.error_term_limit));
         return new ArrayList<>(unique);
     }
 }

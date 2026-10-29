@@ -34,11 +34,11 @@ public final class TranscriptionService extends Service {
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         NotificationManager notifications = getSystemService(NotificationManager.class);
         notifications.createNotificationChannel(new NotificationChannel(
-                CHANNEL, "后台转写", NotificationManager.IMPORTANCE_LOW));
+                CHANNEL, getString(R.string.notification_channel), NotificationManager.IMPORTANCE_LOW));
         Notification notification = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.stat_sys_upload)
-                .setContentTitle("正在转写录音")
-                .setContentText("锁屏或收起键盘不会中断；完成后回到键盘查看")
+                .setContentTitle(getString(R.string.notification_title))
+                .setContentText(getString(R.string.notification_text))
                 .setOngoing(true)
                 .build();
         // startForeground must always run after startForegroundService, even if the job is done.

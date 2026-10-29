@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Gemini Voice Input</string>
+    <string name="cancel">Cancel</string>
+    <string name="seconds">%1$.1f s</string>
+
+    <!-- Keyboard -->
+    <string name="tab_voice">🎙 Voice</string>
+    <string name="tab_edit">✎ Edit</string>
+    <string name="tab_clipboard">📋 Clipboard</string>
+    <string name="key_record">🎙 Record</string>
+    <string name="key_stop">■ Stop</string>
+    <string name="key_space">Space</string>
+    <string name="key_enter">Enter</string>
+    <string name="key_select_all">Select all</string>
+    <string name="key_copy">Copy</string>
+    <string name="key_paste">Paste</string>
+    <string name="key_clear">Clear</string>
+    <string name="key_confirm_clear">Confirm clear</string>
+    <string name="action_insert">Insert text</string>
+    <string name="action_retry">↻ Retry</string>
+    <string name="action_discard">Discard</string>
+    <string name="action_confirm_discard">Confirm discard</string>
+    <string name="action_drop_recording">× Drop recording</string>
+    <string name="action_cancel">× Cancel</string>
+    <string name="clip_label">Text</string>
+    <string name="preview_quote">“%1$s”</string>
+
+    <string name="status_idle">Tap the mic to start recording</string>
+    <string name="status_need_mic_permission">Allow microphone access in Settings</string>
+    <string name="status_need_key">Paste and save your Gemini key (e.g. from Bitwarden) first</string>
+    <string name="status_recording">Recording · tap again to stop</string>
+    <string name="status_record_failed">Couldn\'t start recording: %1$s</string>
+    <string name="status_finishing">Finishing recording</string>
+    <string name="status_private_no_insert">Can\'t type a transcript into a password field</string>
+    <string name="status_tap_field">Tap a text field first</string>
+    <string name="status_insert_failed">This field won\'t accept text; the transcript is kept</string>
+    <string name="status_typed">Text entered · took %1$s · tap the mic to continue</string>
+    <string name="status_inserted">Transcript inserted · tap the mic to continue</string>
+    <string name="status_dropped">Recording dropped</string>
+    <string name="status_discarded">Recording discarded</string>
+    <string name="status_pending">Transcript ready, not typed yet (%1$d chars): %2$s · Tap “Insert text” to type it into the current field</string>
+    <string name="status_audio_unfinished">The last recording wasn\'t transcribed yet · It\'s saved on the phone; tap “Retry”</string>
+    <string name="status_audio_failed">Transcription failed: %1$s · The recording is saved on the phone; tap “Retry”</string>
+    <string name="status_failed">Transcription failed: %1$s</string>
+    <string name="status_private_field">Voice input is off in password fields</string>
+    <string name="status_progress">%1$s · waited %2$s · OK to lock the screen or leave</string>
+    <string name="status_progress_percent">%1$s %2$d%% · waited %3$s · OK to lock the screen or leave</string>
+    <string name="status_select_all_unsupported">This field doesn\'t support Select all</string>
+    <string name="status_private_no_copy">Can\'t copy from a password field</string>
+    <string name="status_select_first">Select some text first, or tap “Select all”</string>
+    <string name="status_copied">Copied · paste it again from “Clipboard”</string>
+    <string name="status_pasted">Pasted</string>
+    <string name="status_paste_failed">Can\'t paste into this field</string>
+    <string name="status_clip_deleted">Clipboard item deleted</string>
+    <string name="status_clipboard_cleared">Clipboard cleared</string>
+    <string name="clipboard_title">Recent copies %1$d/%2$d · tap to paste, long-press to delete</string>
+    <string name="clipboard_empty">Nothing copied yet. Text you copy in any app shows up here; the latest %1$d are kept.</string>
+
+    <!-- Background transcription -->
+    <string name="notification_channel">Background transcription</string>
+    <string name="notification_title">Transcribing recording</string>
+    <string name="notification_text">Locking the screen or hiding the keyboard won\'t stop it; open the keyboard to see the result</string>
+    <string name="stage_saving">Saving recording</string>
+    <string name="stage_reading_saved">Reading saved recording</string>
+    <string name="stage_reading_vocabulary">Reading vocabulary</string>
+    <string name="stage_connecting">Connecting to Gemini</string>
+    <string name="stage_sending">Sending audio · submitted</string>
+    <string name="stage_uploading_rest">Uploading remaining audio</string>
+    <string name="stage_waiting">Waiting for Gemini to finish transcribing</string>
+
+    <!-- Errors -->
+    <string name="error_no_sound">No sound was recorded</string>
+    <string name="error_recording_too_long">Recording is too long; please record in shorter parts</string>
+    <string name="error_recording_missing">The recording file no longer exists; please record again</string>
+    <string name="error_key_missing">Gemini key is not set</string>
+    <string name="error_transcription_failed">Transcription failed</string>
+    <string name="error_unparseable">Gemini returned data that couldn\'t be parsed</string>
+    <string name="error_connect_failed">Couldn\'t connect to Gemini</string>
+    <string name="error_disconnected">Gemini disconnected early (%1$d)</string>
+    <string name="error_connect_timeout">Timed out connecting to Gemini</string>
+    <string name="error_no_text">Gemini returned no text; please try again</string>
+    <string name="error_connection_closed">Gemini connection closed</string>
+    <string name="error_mic_unsupported">This phone doesn\'t support 16 kHz microphone recording</string>
+    <string name="error_mic_open">Couldn\'t open the microphone</string>
+    <string name="error_mic_not_started">The microphone didn\'t start recording</string>
+    <string name="error_mic_read">Microphone read failed: %1$d</string>
+    <string name="error_no_file_selected">No file selected</string>
+    <string name="error_file_not_read_write">This file wasn\'t granted both read and write access; choose an editable text file</string>
+    <string name="error_vocabulary_unreadable">Couldn\'t read the vocabulary file</string>
+    <string name="error_vocabulary_too_large">The vocabulary file is too large</string>
+    <string name="error_vocabulary_access_expired">Access to the vocabulary file has expired; please choose the file again</string>
+    <string name="error_choose_vocabulary_first">Choose a vocabulary file in Google Drive first</string>
+    <string name="error_file_not_writable">This file can\'t be written</string>
+    <string name="error_vocabulary_write_expired">Write access to the vocabulary file has expired; please choose the file again</string>
+    <string name="error_term_limit">Gemini accepts at most 1000 terms</string>
+    <string name="error_term_exists">This term is already in the vocabulary</string>
+    <string name="error_term_not_found">Couldn\'t find the term to edit</string>
+    <string name="error_term_invalid">Enter one non-empty term without line breaks that doesn\'t start with #</string>
+
+    <!-- Settings -->
+    <string name="settings_intro">First allow the microphone and save your own Gemini API key, then choose a vocabulary text file in Google Drive.</string>
+    <string name="settings_ready">Ready</string>
+    <string name="settings_allow_mic">Allow microphone</string>
+    <string name="settings_mic_granted">Microphone access granted</string>
+    <string name="settings_key_header">Gemini API key (stored only on this phone)</string>
+    <string name="settings_key_hint">Paste your key (e.g. from Bitwarden)</string>
+    <string name="settings_save_key">Save key</string>
+    <string name="settings_paste_key_first">Paste a key first</string>
+    <string name="settings_key_encrypted">Key encrypted and saved on this phone</string>
+    <string name="settings_key_saved">Key saved</string>
+    <string name="settings_key_save_failed">Couldn\'t save key: %1$s</string>
+    <string name="settings_delete_key">Delete key from this phone</string>
+    <string name="settings_no_key">No key saved</string>
+    <string name="settings_key_deleted">Key deleted from this phone</string>
+    <string name="settings_key_stored">Key saved on this phone</string>
+    <string name="settings_key_unreadable">Couldn\'t read the key; please save it again</string>
+    <string name="settings_vocabulary_header">Personal vocabulary · Google Drive</string>
+    <string name="settings_vocabulary_intro">Tap “Choose” or “Create” below, open Google Drive in the system file picker, and pick an editable .txt file. The app only gets read and write access to that one file.</string>
+    <string name="settings_no_file">No file chosen yet</string>
+    <string name="settings_file_chosen">Vocabulary file chosen</string>
+    <string name="settings_choose_file">Choose existing vocabulary file</string>
+    <string name="settings_create_file">Create vocabulary file in Google Drive</string>
+    <string name="settings_add_header">Add a term (one at a time)</string>
+    <string name="settings_term_hint">Type a term, then tap Add &amp; save or the Done key</string>
+    <string name="settings_add_save">Add &amp; save</string>
+    <string name="settings_add_note">Added terms are saved to Drive automatically; after editing or deleting terms, tap “Save changes to Drive”.</string>
+    <string name="settings_filter_hint">Filter terms</string>
+    <string name="settings_list_note">Terms are sorted alphabetically and by pinyin. Scroll inside the list below; tap a term to edit it, long-press to delete it.</string>
+    <string name="settings_reload">Reload from Drive</string>
+    <string name="settings_save_changes">Save changes to Drive</string>
+    <string name="settings_ime_header">Keyboard setup</string>
+    <string name="settings_enable_ime">Enable Gemini Voice Input</string>
+    <string name="settings_pick_ime">Choose current keyboard</string>
+    <string name="settings_usage">In any app\'s text field, switch to Gemini Voice Input. Tap the mic to start recording and tap again to stop; when transcription finishes, the text is typed into the current field.</string>
+    <string name="settings_wait_busy">Wait until the vocabulary finishes loading or saving</string>
+    <string name="settings_switch_discards">Switching vocabulary files discards unsaved term changes.</string>
+    <string name="settings_continue">Continue</string>
+    <string name="settings_file_granted">Read and write access granted: %1$s</string>
+    <string name="settings_file_grant_failed">Couldn\'t get access to the vocabulary file: %1$s</string>
+    <string name="settings_wait_saving">Wait until the vocabulary finishes saving</string>
+    <string name="settings_reload_discards">Reloading discards unsaved term changes.</string>
+    <string name="settings_reload_confirm">Reload</string>
+    <string name="settings_choose_file_first">Choose a Drive vocabulary file first</string>
+    <string name="settings_loading">Loading vocabulary from Drive…</string>
+    <string name="settings_load_failed">Loading failed: %1$s</string>
+    <string name="settings_load_first">Choose and load a Drive vocabulary file first</string>
+    <string name="settings_edit_term">Edit term</string>
+    <string name="settings_save">Save</string>
+    <string name="settings_delete_term">Delete the term “%1$s”?</string>
+    <string name="settings_delete">Delete</string>
+    <string name="settings_list_updated">List updated · tap “Save changes to Drive” to sync</string>
+    <string name="settings_load_before_save">Load the vocabulary before saving changes</string>
+    <string name="settings_nothing_to_save">No unsaved vocabulary changes</string>
+    <string name="settings_saving">Saving to Drive…</string>
+    <string name="settings_conflict">The vocabulary in Drive was changed on another device; reload it first so new terms aren\'t overwritten</string>
+    <string name="settings_save_failed">Saving failed; your changes are still in the list. Tap “Save changes to Drive” to retry: %1$s</string>
+    <plurals name="vocabulary_total">
+        <item quantity="one">%1$d term</item>
+        <item quantity="other">%1$d terms</item>
+    </plurals>
+    <plurals name="vocabulary_shown">
+        <item quantity="one">Showing %1$d of %2$d term</item>
+        <item quantity="other">Showing %1$d of %2$d terms</item>
+    </plurals>
+    <plurals name="vocabulary_loaded">
+        <item quantity="one">Loaded %1$d term</item>
+        <item quantity="other">Loaded %1$d terms</item>
+    </plurals>
+    <plurals name="vocabulary_saved">
+        <item quantity="one">Vocabulary saved to Drive · %1$d term</item>
+        <item quantity="other">Vocabulary saved to Drive · %1$d terms</item>
+    </plurals>
+</resources>

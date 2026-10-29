@@ -6,6 +6,7 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -76,7 +77,7 @@ final class DictationJob {
         if (running) return;
         int id = ++attempt;
         running = true;
-        stage = pcm == null ? "正在读取已保存的录音" : "正在保存录音";
+        stage = app.getString(pcm == null ? R.string.stage_reading_saved : R.string.stage_saving);
         percent = -1;
         started = SystemClock.elapsedRealtime();
         error = null;
@@ -115,8 +116,11 @@ final class DictationJob {
         String key = "";
         try {
             byte[] pcm = recorded;
-            if (pcm == null) pcm = store.readAudio();
-            else {
+            if (pcm == null) {
+                // DictationStore has no Context, so the user-facing message comes from here.
+                if (!store.hasAudio()) throw new IOException(app.getString(R.string.error_recording_missing));
+                pcm = store.readAudio();
+            } else {
                 try {
                     store.saveAudio(pcm);
                     post(id, () -> audioKept = true);
@@ -124,11 +128,11 @@ final class DictationJob {
                     // Saving is only a safety net; still try to transcribe.
                 }
             }
-            post(id, () -> { stage = "正在读取词库"; percent = -1; });
+            post(id, () -> { stage = app.getString(R.string.stage_reading_vocabulary); percent = -1; });
             key = SecureKeyStore.read(app);
-            if (key.isEmpty()) throw new IllegalStateException("Gemini Key 未设置");
-            List<String> vocabulary = VocabularyStore.parse(VocabularyStore.read(app));
-            String text = LiveTranscriber.transcribe(pcm, key, "VERBATIM", vocabulary,
+            if (key.isEmpty()) throw new IllegalStateException(app.getString(R.string.error_key_missing));
+            List<String> vocabulary = VocabularyStore.parse(app, VocabularyStore.read(app));
+            String text = LiveTranscriber.transcribe(app, pcm, key, "VERBATIM", vocabulary,
                     (nextStage, nextPercent) -> post(id, () -> { stage = nextStage; percent = nextPercent; }));
             try {
                 store.saveText(text);
@@ -145,7 +149,8 @@ final class DictationJob {
             Thread.currentThread().interrupt();
         } catch (Exception failure) {
             if (Thread.currentThread().isInterrupted()) return;
-            String safe = failure.getMessage() == null ? "转写失败" : failure.getMessage();
+            String safe = failure.getMessage() == null
+                    ? app.getString(R.string.error_transcription_failed) : failure.getMessage();
             if (!key.isEmpty()) safe = safe.replace(key, "[hidden]");
             String message = safe;
             post(id, () -> {

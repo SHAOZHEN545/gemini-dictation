@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Gemini 语音输入</string>
+    <string name="cancel">取消</string>
+    <string name="seconds">%1$.1f 秒</string>
+
+    <!-- Keyboard -->
+    <string name="tab_voice">🎙 语音</string>
+    <string name="tab_edit">✎ 编辑</string>
+    <string name="tab_clipboard">📋 剪贴板</string>
+    <string name="key_record">🎙 录音</string>
+    <string name="key_stop">■ 结束</string>
+    <string name="key_space">空格</string>
+    <string name="key_enter">换行</string>
+    <string name="key_select_all">全选</string>
+    <string name="key_copy">复制</string>
+    <string name="key_paste">粘贴</string>
+    <string name="key_clear">清空</string>
+    <string name="key_confirm_clear">再点确认清空</string>
+    <string name="action_insert">插入文字</string>
+    <string name="action_retry">↻ 重试</string>
+    <string name="action_discard">丢弃</string>
+    <string name="action_confirm_discard">再点确认丢弃</string>
+    <string name="action_drop_recording">× 放弃本段</string>
+    <string name="action_cancel">× 取消</string>
+    <string name="clip_label">文字</string>
+    <string name="preview_quote">「%1$s」</string>
+
+    <string name="status_idle">点击麦克风开始录音</string>
+    <string name="status_need_mic_permission">请在设置中授权麦克风</string>
+    <string name="status_need_key">请先从 Bitwarden 粘贴并保存 Gemini Key</string>
+    <string name="status_recording">正在录音 · 再点一次结束</string>
+    <string name="status_record_failed">录音无法开始：%1$s</string>
+    <string name="status_finishing">正在结束录音</string>
+    <string name="status_private_no_insert">密码输入框不能写入转写文字</string>
+    <string name="status_tap_field">请先点一个输入框</string>
+    <string name="status_insert_failed">当前输入框无法写入，文字仍保留</string>
+    <string name="status_typed">已输入文字 · 耗时 %1$s · 点击麦克风可继续</string>
+    <string name="status_inserted">已插入转写文字 · 点击麦克风可继续</string>
+    <string name="status_dropped">已放弃本段录音</string>
+    <string name="status_discarded">已丢弃这段录音</string>
+    <string name="status_pending">转写完成，尚未输入（%1$d 字）：%2$s · 点「插入文字」写入当前输入框</string>
+    <string name="status_audio_unfinished">上次录音还没有转写完成 · 录音已保存在手机上，可点「重试」</string>
+    <string name="status_audio_failed">转写失败：%1$s · 录音已保存在手机上，可点「重试」</string>
+    <string name="status_failed">转写失败：%1$s</string>
+    <string name="status_private_field">密码输入框已禁用语音</string>
+    <string name="status_progress">%1$s · 已等待 %2$s · 可锁屏或离开</string>
+    <string name="status_progress_percent">%1$s %2$d%% · 已等待 %3$s · 可锁屏或离开</string>
+    <string name="status_select_all_unsupported">当前输入框不支持全选</string>
+    <string name="status_private_no_copy">密码输入框不能复制内容</string>
+    <string name="status_select_first">请先选中文字；可点“全选”</string>
+    <string name="status_copied">已复制，可在「剪贴板」里再次粘贴</string>
+    <string name="status_pasted">已粘贴</string>
+    <string name="status_paste_failed">当前输入框无法粘贴</string>
+    <string name="status_clip_deleted">已删除一条剪贴板记录</string>
+    <string name="status_clipboard_cleared">剪贴板已清空</string>
+    <string name="clipboard_title">最近复制 %1$d/%2$d · 点一下粘贴，长按删除</string>
+    <string name="clipboard_empty">还没有复制过文字。在任意 App 里复制后会出现在这里，最多保留最近 %1$d 条。</string>
+
+    <!-- Background transcription -->
+    <string name="notification_channel">后台转写</string>
+    <string name="notification_title">正在转写录音</string>
+    <string name="notification_text">锁屏或收起键盘不会中断；完成后回到键盘查看</string>
+    <string name="stage_saving">正在保存录音</string>
+    <string name="stage_reading_saved">正在读取已保存的录音</string>
+    <string name="stage_reading_vocabulary">正在读取词库</string>
+    <string name="stage_connecting">正在连接 Gemini</string>
+    <string name="stage_sending">发送音频 · 已提交</string>
+    <string name="stage_uploading_rest">正在上传剩余音频</string>
+    <string name="stage_waiting">等待 Gemini 完成转写</string>
+
+    <!-- Errors -->
+    <string name="error_no_sound">没有录到声音</string>
+    <string name="error_recording_too_long">录音太长，请分段录制</string>
+    <string name="error_recording_missing">录音文件已不存在，请重新录音</string>
+    <string name="error_key_missing">Gemini Key 未设置</string>
+    <string name="error_transcription_failed">转写失败</string>
+    <string name="error_unparseable">Gemini 返回了无法解析的数据</string>
+    <string name="error_connect_failed">Gemini 连接失败</string>
+    <string name="error_disconnected">Gemini 提前断开连接（%1$d）</string>
+    <string name="error_connect_timeout">连接 Gemini 超时</string>
+    <string name="error_no_text">Gemini 没有返回文字，请重试</string>
+    <string name="error_connection_closed">Gemini 连接已关闭</string>
+    <string name="error_mic_unsupported">手机不支持 16 kHz 麦克风录音</string>
+    <string name="error_mic_open">麦克风无法打开</string>
+    <string name="error_mic_not_started">麦克风没有开始录音</string>
+    <string name="error_mic_read">麦克风读取失败：%1$d</string>
+    <string name="error_no_file_selected">没有选中文件</string>
+    <string name="error_file_not_read_write">这个文件没有同时授予读写权限，请选择可编辑的文本文件</string>
+    <string name="error_vocabulary_unreadable">无法读取词库文件</string>
+    <string name="error_vocabulary_too_large">词库文件过大</string>
+    <string name="error_vocabulary_access_expired">词库授权已失效，请重新选择文件</string>
+    <string name="error_choose_vocabulary_first">请先选择 Google Drive 中的词库文件</string>
+    <string name="error_file_not_writable">这个文件无法写入</string>
+    <string name="error_vocabulary_write_expired">词库写入权限已失效，请重新选择文件</string>
+    <string name="error_term_limit">Gemini 最多接受 1000 个词条</string>
+    <string name="error_term_exists">词库里已经有这个词条</string>
+    <string name="error_term_not_found">找不到要修改的词条</string>
+    <string name="error_term_invalid">请输入一个非空词条，不要包含换行或以 # 开头</string>
+
+    <!-- Settings -->
+    <string name="settings_intro">先授权麦克风、保存自己的 Gemini API Key，再选 Google Drive 中的词库文本文件。</string>
+    <string name="settings_ready">准备就绪</string>
+    <string name="settings_allow_mic">授权麦克风</string>
+    <string name="settings_mic_granted">麦克风已授权</string>
+    <string name="settings_key_header">Gemini API Key（只保存在本机）</string>
+    <string name="settings_key_hint">从 Bitwarden 粘贴 Key</string>
+    <string name="settings_save_key">保存 Key</string>
+    <string name="settings_paste_key_first">请先粘贴 Key</string>
+    <string name="settings_key_encrypted">Key 已加密保存在本机</string>
+    <string name="settings_key_saved">Key 已保存</string>
+    <string name="settings_key_save_failed">Key 保存失败：%1$s</string>
+    <string name="settings_delete_key">删除本机 Key</string>
+    <string name="settings_no_key">未保存 Key</string>
+    <string name="settings_key_deleted">本机 Key 已删除</string>
+    <string name="settings_key_stored">Key 已保存在本机</string>
+    <string name="settings_key_unreadable">Key 无法读取，请重新保存</string>
+    <string name="settings_vocabulary_header">个人词库 · Google Drive</string>
+    <string name="settings_vocabulary_intro">点“选择”后在系统文件选择器中进入 Google Drive，选一份可编辑的 .txt 文件。应用只获得这一个文件的读写权限。</string>
+    <string name="settings_no_file">尚未选择文件</string>
+    <string name="settings_file_chosen">已选择词库文件</string>
+    <string name="settings_choose_file">选择已有词库文件</string>
+    <string name="settings_create_file">在 Google Drive 新建词库文件</string>
+    <string name="settings_add_header">添加词条（每次输入一个）</string>
+    <string name="settings_term_hint">输入词条后点添加并保存或键盘完成键</string>
+    <string name="settings_add_save">添加并保存</string>
+    <string name="settings_add_note">添加后自动保存到 Drive；修改和删除词条后仍需点“保存修改到 Drive”。</string>
+    <string name="settings_filter_hint">筛选词条</string>
+    <string name="settings_list_note">词条按字母和拼音排列；在下方列表内滑动浏览，点词条修改，长按删除。</string>
+    <string name="settings_reload">从 Drive 重新读取</string>
+    <string name="settings_save_changes">保存修改到 Drive</string>
+    <string name="settings_ime_header">输入法设置</string>
+    <string name="settings_enable_ime">启用 Gemini 语音输入</string>
+    <string name="settings_pick_ime">选择当前输入法</string>
+    <string name="settings_usage">在其他 App 的输入框里切换到 Gemini 语音输入。点击麦克风开始录音，再点一次结束；转写完成后文字会写入当前输入框。</string>
+    <string name="settings_wait_busy">请等词库读取或保存完成</string>
+    <string name="settings_switch_discards">切换词库文件会放弃尚未保存的词条修改。</string>
+    <string name="settings_continue">继续</string>
+    <string name="settings_file_granted">已授权读取和写入：%1$s</string>
+    <string name="settings_file_grant_failed">词库授权失败：%1$s</string>
+    <string name="settings_wait_saving">请等词库保存完成</string>
+    <string name="settings_reload_discards">重新读取会放弃尚未保存的词条修改。</string>
+    <string name="settings_reload_confirm">重新读取</string>
+    <string name="settings_choose_file_first">请先选择 Drive 词库文件</string>
+    <string name="settings_loading">正在从 Drive 读取词库…</string>
+    <string name="settings_load_failed">读取失败：%1$s</string>
+    <string name="settings_load_first">请先选择并读取 Drive 词库文件</string>
+    <string name="settings_edit_term">修改词条</string>
+    <string name="settings_save">保存</string>
+    <string name="settings_delete_term">删除词条“%1$s”？</string>
+    <string name="settings_delete">删除</string>
+    <string name="settings_list_updated">已更新列表 · 点击“保存修改到 Drive”同步</string>
+    <string name="settings_load_before_save">请先读取词库，再保存修改</string>
+    <string name="settings_nothing_to_save">词库没有待保存的修改</string>
+    <string name="settings_saving">正在保存到 Drive…</string>
+    <string name="settings_conflict">云端词库已被其他设备修改，请先重新读取，以免覆盖新词条</string>
+    <string name="settings_save_failed">保存失败，修改仍在当前列表中，请点击“保存修改到 Drive”重试：%1$s</string>
+    <plurals name="vocabulary_total">
+        <item quantity="other">共 %1$d 个词条</item>
+    </plurals>
+    <plurals name="vocabulary_shown">
+        <item quantity="other">显示 %1$d / 共 %2$d 个词条</item>
+    </plurals>
+    <plurals name="vocabulary_loaded">
+        <item quantity="other">已读取 %1$d 个词条</item>
+    </plurals>
+    <plurals name="vocabulary_saved">
+        <item quantity="other">词库已保存到 Drive · %1$d 个词条</item>
+    </plurals>
+</resources>

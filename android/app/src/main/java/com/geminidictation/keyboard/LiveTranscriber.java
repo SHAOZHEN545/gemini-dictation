@@ -1,5 +1,6 @@
 package com.geminidictation.keyboard;
 
+import android.content.Context;
 import android.net.Uri;
 import android.os.SystemClock;
 import android.util.Base64;
@@ -32,12 +33,13 @@ final class LiveTranscriber {
 
     private LiveTranscriber() { }
 
-    static String transcribe(byte[] pcm, String apiKey, String mode, List<String> vocabulary,
+    static String transcribe(Context context, byte[] pcm, String apiKey, String mode, List<String> vocabulary,
                              ProgressListener progress) throws Exception {
-        if (pcm.length == 0) throw new IllegalArgumentException("没有录到声音");
+        if (pcm.length == 0) throw new IllegalArgumentException(context.getString(R.string.error_no_sound));
         double seconds = pcm.length / (PcmRecorder.SAMPLE_RATE * 2.0);
-        if (seconds > PcmRecorder.MAX_SECONDS + 2) throw new IllegalArgumentException("录音太长，请分段录制");
-        progress.onProgress("正在连接 Gemini", -1);
+        if (seconds > PcmRecorder.MAX_SECONDS + 2)
+            throw new IllegalArgumentException(context.getString(R.string.error_recording_too_long));
+        progress.onProgress(context.getString(R.string.stage_connecting), -1);
 
         CountDownLatch setup = new CountDownLatch(1);
         CountDownLatch done = new CountDownLatch(1);
@@ -83,32 +85,36 @@ final class LiveTranscriber {
                     }
                     if (content.optBoolean("generationComplete")) done.countDown();
                 } catch (Exception error) {
-                    failure.compareAndSet(null, "Gemini 返回了无法解析的数据");
+                    failure.compareAndSet(null, context.getString(R.string.error_unparseable));
                     setup.countDown();
                     done.countDown();
                 }
             }
 
             @Override public void onFailure(WebSocket webSocket, Throwable error, Response response) {
-                failure.compareAndSet(null, error.getMessage() == null ? "Gemini 连接失败" :
+                failure.compareAndSet(null, error.getMessage() == null
+                        ? context.getString(R.string.error_connect_failed) :
                         error.getMessage().replace(apiKey, "[hidden]"));
                 setup.countDown();
                 done.countDown();
             }
 
             @Override public void onClosed(WebSocket webSocket, int code, String reason) {
-                if (done.getCount() != 0) failure.compareAndSet(null, "Gemini 提前断开连接（" + code + "）");
+                if (done.getCount() != 0)
+                    failure.compareAndSet(null, context.getString(R.string.error_disconnected, code));
                 setup.countDown();
                 done.countDown();
             }
         });
         try {
-            if (!setup.await(20, TimeUnit.SECONDS)) throw new IllegalStateException("连接 Gemini 超时");
+            if (!setup.await(20, TimeUnit.SECONDS))
+                throw new IllegalStateException(context.getString(R.string.error_connect_timeout));
             if (failure.get() != null) throw new IllegalStateException(failure.get());
-            send(socket, "{\"realtimeInput\":{\"activityStart\":{}}}");
+            send(context, socket, "{\"realtimeInput\":{\"activityStart\":{}}}");
             long started = SystemClock.elapsedRealtime();
             int lastPercent = -1;
-            progress.onProgress("发送音频 · 已提交", 0);
+            String sending = context.getString(R.string.stage_sending);
+            progress.onProgress(sending, 0);
             for (int offset = 0; offset < pcm.length; offset += 3200) {
                 if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
                 if (failure.get() != null) throw new IllegalStateException(failure.get());
@@ -121,24 +127,24 @@ final class LiveTranscriber {
                 JSONObject chunk = new JSONObject().put("realtimeInput", new JSONObject()
                         .put("audio", new JSONObject().put("data", encoded)
                                 .put("mimeType", "audio/pcm;rate=16000")));
-                send(socket, chunk.toString());
+                send(context, socket, chunk.toString());
                 int percent = (int) ((offset + length) * 100L / pcm.length);
                 if (percent != lastPercent) {
-                    progress.onProgress("发送音频 · 已提交", percent);
+                    progress.onProgress(sending, percent);
                     lastPercent = percent;
                 }
             }
-            send(socket, "{\"realtimeInput\":{\"activityEnd\":{}}}");
+            send(context, socket, "{\"realtimeInput\":{\"activityEnd\":{}}}");
             long timeout = (long) ((30 + seconds / 4 * 2) * 1000);
             long deadline = SystemClock.elapsedRealtime() + timeout;
-            progress.onProgress("正在上传剩余音频", -1);
+            progress.onProgress(context.getString(R.string.stage_uploading_rest), -1);
             // send() queues messages locally. Only label the next stage as waiting for
             // Gemini after OkHttp has written that queue to the network.
             boolean waitingForGemini = false;
             while (done.getCount() != 0) {
                 if (!waitingForGemini && socket.queueSize() == 0) {
                     waitingForGemini = true;
-                    progress.onProgress("等待 Gemini 完成转写", -1);
+                    progress.onProgress(context.getString(R.string.stage_waiting), -1);
                 }
                 long remaining = deadline - SystemClock.elapsedRealtime();
                 if (remaining <= 0) break;
@@ -149,13 +155,14 @@ final class LiveTranscriber {
                 if (!result.isEmpty()) return result;
             }
             if (failure.get() != null) throw new IllegalStateException(failure.get());
-            throw new IllegalStateException("Gemini 没有返回文字，请重试");
+            throw new IllegalStateException(context.getString(R.string.error_no_text));
         } finally {
             socket.cancel();
         }
     }
 
-    private static void send(WebSocket socket, String message) {
-        if (!socket.send(message)) throw new IllegalStateException("Gemini 连接已关闭");
+    private static void send(Context context, WebSocket socket, String message) {
+        if (!socket.send(message))
+            throw new IllegalStateException(context.getString(R.string.error_connection_closed));
     }
 }
