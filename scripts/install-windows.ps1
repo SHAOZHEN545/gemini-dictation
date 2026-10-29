@@ -16,6 +16,17 @@ $logPath = Join-Path $runtimeRoot 'install.log'
 $form = $null
 $installLock = $null
 
+# English by default; Simplified Chinese when Windows shows Chinese. GEMINI_DICTATION_LANG=en|zh overrides.
+$languageOverride = "$env:GEMINI_DICTATION_LANG".Trim().ToLowerInvariant()
+if ($languageOverride -like 'zh*') { $useChinese = $true }
+elseif ($languageOverride -like 'en*') { $useChinese = $false }
+else { $useChinese = (Get-UICulture).Name -like 'zh*' }
+
+function Localize([string]$English, [string]$Chinese) {
+    if ($useChinese) { return $Chinese }
+    return $English
+}
+
 function Write-InstallLog([string]$Message) {
     [IO.File]::AppendAllText($logPath, $Message + [Environment]::NewLine, [Text.Encoding]::UTF8)
 }
@@ -100,7 +111,8 @@ namespace GeminiDictation {
         [GeminiDictation.ShellShortcut]::Save($Path, $Target, $Arguments, $WorkingDirectory, $Description, $IconPath)
     }
     catch {
-        throw "无法创建桌面快捷方式：$Path`r`n$($_.Exception.GetBaseException().Message)"
+        $detail = $_.Exception.GetBaseException().Message
+        throw ((Localize 'Could not create the desktop shortcut: ' '无法创建桌面快捷方式：') + "$Path`r`n$detail")
     }
 }
 
@@ -123,7 +135,7 @@ function Invoke-InstallerProcess([string]$Executable, [string[]]$Arguments) {
         while (-not $process.HasExited) {
             if ([DateTime]::UtcNow -gt $deadline) {
                 $process.Kill()
-                throw '下载或安装超时。请检查网络后重新双击安装文件。'
+                throw (Localize 'Download or installation timed out. Check your network, then double-click the installer again.' '下载或安装超时。请检查网络后重新双击安装文件。')
             }
             Wait-ForUI
         }
@@ -144,7 +156,7 @@ function Download-InstallerFile([string]$Url, [string]$Destination) {
         while (-not $task.IsCompleted) {
             if ([DateTime]::UtcNow -gt $deadline) {
                 $client.CancelAsync()
-                throw '下载超时。请检查网络后重新双击安装文件。'
+                throw (Localize 'Download timed out. Check your network, then double-click the installer again.' '下载超时。请检查网络后重新双击安装文件。')
             }
             Wait-ForUI
         }
@@ -158,7 +170,7 @@ try {
     try {
         $installLock = [IO.File]::Open((Join-Path $runtimeRoot 'install.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
     }
-    catch { throw '另一个安装窗口正在运行。请等待它完成后再试。' }
+    catch { throw (Localize 'Another installer window is running. Wait for it to finish, then try again.' '另一个安装窗口正在运行。请等待它完成后再试。') }
     [IO.File]::WriteAllText($logPath, "Gemini Dictation installation`r`n", [Text.Encoding]::UTF8)
 
     if (-not $Headless) {
@@ -166,7 +178,7 @@ try {
         Add-Type -AssemblyName System.Drawing
         [Windows.Forms.Application]::EnableVisualStyles()
         $form = New-Object Windows.Forms.Form
-        $form.Text = '安装 Gemini Dictation'
+        $form.Text = Localize 'Install Gemini Dictation' '安装 Gemini Dictation'
         $form.Icon = New-Object Drawing.Icon($appIconPath)
         $form.ClientSize = New-Object Drawing.Size(560, 215)
         $form.StartPosition = 'CenterScreen'
@@ -176,7 +188,7 @@ try {
         $form.Font = New-Object Drawing.Font('Microsoft YaHei UI', 10)
         $intro = New-Object Windows.Forms.Label
         $intro.SetBounds(24, 18, 512, 52)
-        $intro.Text = "首次安装需要联网下载运行环境。`r`n请稍候，无需输入命令或安装其他软件。"
+        $intro.Text = Localize "The first installation downloads the runtime from the internet.`r`nPlease wait; there is nothing to type and nothing else to install." "首次安装需要联网下载运行环境。`r`n请稍候，无需输入命令或安装其他软件。"
         $statusLabel = New-Object Windows.Forms.Label
         $statusLabel.SetBounds(24, 83, 512, 48)
         $progressBar = New-Object Windows.Forms.ProgressBar
@@ -190,13 +202,13 @@ try {
 
     if (-not [Environment]::Is64BitOperatingSystem -or
         $env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') {
-        throw '此安装入口支持 Windows 10 / 11 的 Intel 或 AMD 64 位电脑。其他设备可使用网页版。'
+        throw (Localize 'This installer supports Intel or AMD 64-bit PCs with Windows 10 / 11. On other devices, use the web version.' '此安装入口支持 Windows 10 / 11 的 Intel 或 AMD 64 位电脑。其他设备可使用网页版。')
     }
     if (-not (Test-Path -LiteralPath (Join-Path $projectRoot 'pyproject.toml'))) {
-        throw '请先完整解压项目，再从项目文件夹双击安装文件。'
+        throw (Localize 'Extract the whole project first, then double-click the installer in the project folder.' '请先完整解压项目，再从项目文件夹双击安装文件。')
     }
 
-    Update-Progress '1 / 4：准备安装工具…'
+    Update-Progress (Localize '1 / 4: Preparing the installation tools…' '1 / 4：准备安装工具…')
     # Pin the release and verify its published SHA-256 before executing it.
     $uvVersion = '0.12.19'
     $uvDigest = '6dbb02d79e419522f1c500f0adb1cddcff0cda7d59b0d66ea7f5e3b4a1b2f5f0'
@@ -206,7 +218,7 @@ try {
         $archive = Join-Path $runtimeRoot "uv-$uvVersion.zip"
         Download-InstallerFile "https://github.com/astral-sh/uv/releases/download/$uvVersion/uv-x86_64-pc-windows-msvc.zip" $archive
         if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $uvDigest) {
-            throw '下载文件的安全校验失败。请重新安装；程序未执行该文件。'
+            throw (Localize 'The downloaded file failed its security check and was not run. Please install again.' '下载文件的安全校验失败。请重新安装；程序未执行该文件。')
         }
         Expand-Archive -LiteralPath $archive -DestinationPath $uvDirectory -Force
     }
@@ -217,7 +229,7 @@ try {
     $env:UV_NO_PROGRESS = '1'
     $env:UV_NO_CONFIG = '1'
 
-    Update-Progress '2 / 4：准备独立的 Python 运行环境…'
+    Update-Progress (Localize '2 / 4: Preparing a separate Python environment…' '2 / 4：准备独立的 Python 运行环境…')
     $healthy = $false
     if ((Test-Path -LiteralPath $pythonExe) -and (Test-Path -LiteralPath $pythonwExe)) {
         try {
@@ -231,37 +243,38 @@ try {
             # Preserve an old/copied environment instead of deleting user files.
             $backup = Join-Path $runtimeRoot ('old-venv-' + [Guid]::NewGuid().ToString('N'))
             if (-not [IO.Path]::GetFullPath($backup).StartsWith($runtimeRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-                throw '运行环境备份位置无效。'
+                throw (Localize 'The backup location for the old environment is invalid.' '运行环境备份位置无效。')
             }
             Move-Item -LiteralPath $venvDirectory -Destination $backup
         }
         if ((Invoke-InstallerProcess $uvExe @('venv', '--managed-python', '--python', '3.13', $venvDirectory)) -ne 0) {
-            throw '无法准备 Python。请确认能访问 GitHub，然后重新安装。'
+            throw (Localize 'Could not set up Python. Make sure GitHub is reachable, then install again.' '无法准备 Python。请确认能访问 GitHub，然后重新安装。')
         }
     }
 
-    Update-Progress '3 / 4：安装桌面程序和音频组件（可能需要几分钟）…'
+    Update-Progress (Localize '3 / 4: Installing the desktop app and audio components (this can take a few minutes)…' '3 / 4：安装桌面程序和音频组件（可能需要几分钟）…')
     if ((Invoke-InstallerProcess $uvExe @('pip', 'install', '--python', $pythonExe, '--upgrade', '-e', '.[gui]')) -ne 0) {
-        throw '组件安装失败。请确认能访问 GitHub 和 PyPI，检查网络后重新安装。'
+        throw (Localize 'Installing the components failed. Make sure GitHub and PyPI are reachable, check your network, then install again.' '组件安装失败。请确认能访问 GitHub 和 PyPI，检查网络后重新安装。')
     }
 
-    Update-Progress '4 / 4：检查程序并创建快捷方式…'
+    Update-Progress (Localize '4 / 4: Checking the app and creating the shortcut…' '4 / 4：检查程序并创建快捷方式…')
     if ((Invoke-InstallerProcess $pythonExe @('-c', 'import gemini_live_dictation.gui, av, sounddevice; from PySide6.QtWidgets import QApplication')) -ne 0) {
-        throw '程序检查未通过。请重新安装，或查看安装日志。'
+        throw (Localize 'The app check failed. Install again, or see the installation log.' '程序检查未通过。请重新安装，或查看安装日志。')
     }
     if (-not $NoShortcuts) {
         $desktop = [Environment]::GetFolderPath('DesktopDirectory')
         Save-Shortcut -Path (Join-Path $desktop 'Gemini Dictation.lnk') -Target $pythonwExe `
             -Arguments (Quote-NativeArgument (Join-Path $projectRoot 'scripts\launch-desktop.pyw')) `
-            -WorkingDirectory $projectRoot -Description 'Gemini 语音转写' -IconPath $appIconPath
+            -WorkingDirectory $projectRoot -Description (Localize 'Gemini voice transcription' 'Gemini 语音转写') -IconPath $appIconPath
     }
-    Update-Progress '安装完成。首次打开后，请保存 API Key 并选择词库文件。'
+    Update-Progress (Localize 'Installation complete. When the app opens, save your Gemini API key and choose a vocabulary file.' '安装完成。首次打开后，请保存 API Key 并选择词库文件。')
     if (-not $NoLaunch) {
         Start-Process -FilePath $pythonwExe -ArgumentList (Quote-NativeArgument (Join-Path $projectRoot 'scripts\launch-desktop.pyw')) -WorkingDirectory $projectRoot -WindowStyle Hidden
     }
     if (-not $Headless) {
         $form.Hide()
-        [void][Windows.Forms.MessageBox]::Show('安装完成。以后双击桌面上的 Gemini Dictation 即可打开。请保留当前项目文件夹。', 'Gemini Dictation', 'OK', 'Information')
+        $done = Localize 'Installation complete. From now on, double-click Gemini Dictation on the desktop to open it. Keep this project folder.' '安装完成。以后双击桌面上的 Gemini Dictation 即可打开。请保留当前项目文件夹。'
+        [void][Windows.Forms.MessageBox]::Show($done, 'Gemini Dictation', 'OK', 'Information')
     }
     exit 0
 }
@@ -270,11 +283,14 @@ catch {
     if (Test-Path -LiteralPath $runtimeRoot) {
         try { Write-InstallLog $message } catch { }
     }
-    if ($Headless) { [Console]::Error.WriteLine($message + "`n日志：" + $logPath) }
+    $logLabel = Localize 'Log: ' '日志：'
+    if ($Headless) { [Console]::Error.WriteLine($message + "`n" + $logLabel + $logPath) }
     else {
         Add-Type -AssemblyName System.Windows.Forms
         if ($null -ne $form) { $form.Hide() }
-        [void][Windows.Forms.MessageBox]::Show($message + "`r`n`r`n无需输入命令，修复后重新双击 Install Dictation.cmd 即可。`r`n日志：" + $logPath, 'Gemini Dictation 安装未完成', 'OK', 'Error')
+        $hint = Localize 'No commands needed: fix the problem, then double-click Install Dictation.cmd again.' '无需输入命令，修复后重新双击 Install Dictation.cmd 即可。'
+        $title = Localize 'Gemini Dictation installation incomplete' 'Gemini Dictation 安装未完成'
+        [void][Windows.Forms.MessageBox]::Show($message + "`r`n`r`n" + $hint + "`r`n" + $logLabel + $logPath, $title, 'OK', 'Error')
     }
     exit 1
 }

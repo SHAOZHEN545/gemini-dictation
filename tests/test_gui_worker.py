@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import os
+import string
 import tempfile
 import time
 import unittest
@@ -16,8 +18,10 @@ from unittest.mock import Mock, patch
 
 from PySide6.QtWidgets import QApplication
 
-from gemini_live_dictation.cli import decode_file_to_pcm
+from gemini_live_dictation import gui
+from gemini_live_dictation.cli import SAMPLE_RATE, decode_file_to_pcm
 from gemini_live_dictation.gui import (
+    LIVE_RECORDING_SECONDS,
     BatchTranscribeWorker,
     DictationWindow,
     LiveReplayWorker,
@@ -27,6 +31,7 @@ from gemini_live_dictation.gui import (
     join_live_transcripts,
     retry_delay,
 )
+from gemini_live_dictation.i18n import LANGUAGE_VARIABLE, ZH, detect_language, tr, tr_n
 
 
 class FakeInputStream:
@@ -81,11 +86,16 @@ class FakeLiveConnection:
         return None
 
 
+def start_app() -> QApplication:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    return QApplication.instance() or QApplication([])
+
+
+@patch("gemini_live_dictation.i18n.LANGUAGE", "en")  # Assertions below expect the English interface.
 class GuiWorkerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = start_app()
 
     def test_live_chunks_do_not_create_paragraphs(self) -> None:
         self.assertEqual(join_live_transcripts(["其实当时的时候我们已经开始这个", "就是"]),
@@ -100,7 +110,7 @@ class GuiWorkerTests(unittest.TestCase):
             self.app.processEvents()
             meter_width = window.level_meter.width()
             status_width = window.level_status.width()
-            for message in ("正在拾音", "声音偏小 / 安静", "录音已结束"):
+            for message in ("Picking up sound", "Quiet / low level", "Recording finished"):
                 window.level_status.setText(message)
                 self.app.processEvents()
                 self.assertEqual(window.level_status.width(), status_width)
@@ -194,7 +204,7 @@ class GuiWorkerTests(unittest.TestCase):
         texts: list[str] = []
         errors: list[str] = []
         worker.text_ready.connect(texts.append)
-        worker.failed.connect(errors.append)
+        worker.failed.connect(lambda message, _retryable: errors.append(message))
         with patch("gemini_live_dictation.gui.genai.Client", return_value=client):
             worker.run()
         self.assertEqual(errors, [])
@@ -204,6 +214,18 @@ class GuiWorkerTests(unittest.TestCase):
         self.assertEqual(request["model"], "gemini-3.5-transcribe")
         self.assertEqual(request["generation_config"]["transcription_config"]["custom_vocabulary"], ["QUBIG"])
         self.assertEqual(request["generation_config"]["transcription_config"]["mode"], {"type": "verbatim"})
+
+    def test_too_long_live_recording_fails_without_retrying(self) -> None:
+        worker = LiveReplayWorker("test-key", "VERBATIM", Path("test.wav"), [])
+        failures: list[tuple[str, object]] = []
+        worker.failed.connect(lambda message, retryable: failures.append((message, retryable)))
+        too_long = bytes(SAMPLE_RATE * 2 * (LIVE_RECORDING_SECONDS + 3))
+        with patch("gemini_live_dictation.gui.decode_file_to_pcm", return_value=too_long):
+            worker.run()
+        [(message, retryable)] = failures
+        self.assertIn("Standard Transcribe", message)
+        self.assertIs(retryable, False)
+        self.assertIsNone(retry_delay(message, 1, retryable))
 
     def _recording_window(self, stack: ExitStack) -> tuple[DictationWindow, Mock, Mock]:
         """A window with a fake microphone; worker threads are never actually started."""
@@ -269,7 +291,7 @@ class GuiWorkerTests(unittest.TestCase):
             self.assertFalse(window.level_timer.isActive())
             self.assertFalse(window.discard_button.isVisibleTo(window))
             self.assertTrue(window.record_button.isEnabled())
-            self.assertIn("放弃", window.status_label.text())
+            self.assertIn("discarded", window.status_label.text())
             # The discarded take does not use up a segment number.
             window._toggle_recording()
             window._toggle_recording()
@@ -287,7 +309,7 @@ class GuiWorkerTests(unittest.TestCase):
             self._settle(first, error="1011 None. You exceeded your current quota, please check your plan.")
             self.assertEqual(first.state, "retry")
             self.assertEqual(fourth.state, "queued", "a quota refusal pauses new starts")
-            self.assertIn("限流冷却", window.queue_label.text())
+            self.assertIn("cooldown", window.queue_label.text())
 
             first.retry_at = window.cooldown_until = 0.0
             window._dispatch_jobs()
@@ -325,7 +347,7 @@ class GuiWorkerTests(unittest.TestCase):
             window._remove_selected()
             self.assertEqual(window.jobs, [third, fourth], "the running job stays in the list")
             self.assertEqual(window.job_list.count(), 2)
-            self.assertIn("1 段还在转写", window.status_label.text())
+            self.assertIn("1 still transcribing", window.status_label.text())
             self.assertEqual(first.transcript_path.read_text(encoding="utf-8"), "第一段（改）\n")
 
             window._copy_all()
@@ -366,11 +388,15 @@ class GuiWorkerTests(unittest.TestCase):
     def test_retry_delay_follows_server_hint_and_skips_hopeless_errors(self) -> None:
         self.assertEqual(retry_delay("1011 None. You exceeded your current quota", 1), 10)
         self.assertEqual(retry_delay("429 RESOURCE_EXHAUSTED. Please retry in 44.2s.", 1), 46)
-        self.assertEqual(retry_delay("Live 连接在录音发送完之前关闭。", 2), 30)
+        # Windows reports socket errors in the system language.
+        self.assertEqual(retry_delay("[WinError 10054] 远程主机强迫关闭了一个现有的连接。", 1), 10)
         self.assertIsNone(retry_delay("1011 quota", 4))
         self.assertIsNone(retry_delay("400 API key not valid. Please pass a valid API key.", 1))
-        self.assertIsNone(retry_delay("这段录音超过 Live 安全时长，请改用普通 Transcribe。", 1))
         self.assertIsNone(retry_delay("Audio file was not found", 1))
+        # The app's own errors say whether retrying helps, whatever language their text is in.
+        self.assertEqual(retry_delay("Any wording", 2, retryable=True), 30)
+        self.assertIsNone(retry_delay("Any wording", 4, retryable=True))
+        self.assertIsNone(retry_delay("Live closed the connection", 1, retryable=False))
 
     def test_live_limit_warns_and_auto_stops(self) -> None:
         microphone = Microphone(1, "Test microphone", 48000, "WASAPI")
@@ -383,13 +409,52 @@ class GuiWorkerTests(unittest.TestCase):
             window.elapsed_seconds = 479
             with patch.object(window, "_stop_recording") as stop:
                 window._tick()
-                self.assertIn("30 秒", window.status_label.text())
+                self.assertIn("30 seconds", window.status_label.text())
                 stop.assert_not_called()
                 window.elapsed_seconds = 509
                 window._tick()
                 stop.assert_called_once()
             window.recorder = None
             window.close()
+
+
+class TranslationTests(unittest.TestCase):
+    def test_environment_variable_overrides_the_system_language(self) -> None:
+        for value, expected in (("zh", "zh"), ("zh-CN", "zh"), ("en", "en"), ("EN", "en")):
+            with patch.dict(os.environ, {LANGUAGE_VARIABLE: value}):
+                self.assertEqual(detect_language(), expected)
+
+    def test_chinese_table_is_used_when_the_language_is_zh(self) -> None:
+        with patch("gemini_live_dictation.i18n.LANGUAGE", "zh"):
+            self.assertEqual(tr("Start recording"), "开始录音")
+            self.assertEqual(
+                tr("Recording {number}: {reason}, retrying in {delay} s", number=2, reason=tr("rate-limited"), delay=10),
+                "第 2 段遇到额度限流，10 秒后自动重试",
+            )
+            self.assertEqual(tr_n("1 term", "{count} terms", 1), "共 1 项")
+            start_app()
+            with patch("gemini_live_dictation.gui.microphone_options", return_value=[]):
+                window = DictationWindow()
+                self.assertEqual(window.record_button.text(), "开始录音")
+                window.close()
+        with patch("gemini_live_dictation.i18n.LANGUAGE", "en"):
+            self.assertEqual(tr("Start recording"), "Start recording")
+            self.assertEqual(tr_n("1 term", "{count} terms", 2), "2 terms")
+
+    def test_every_interface_string_has_chinese_with_the_same_placeholders(self) -> None:
+        def fields(text: str) -> set[str]:
+            return {name for _, name, _, _ in string.Formatter().parse(text) if name is not None}
+
+        used: dict[str, bool] = {}  # English text -> whether tr_n() supplies {count}.
+        for node in ast.walk(ast.parse(Path(gui.__file__).read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("tr", "tr_n"):
+                for argument in node.args[: 1 if node.func.id == "tr" else 2]:
+                    self.assertIsInstance(argument, ast.Constant, "tr() needs literal text so it can be checked")
+                    used[argument.value] = used.get(argument.value, False) or node.func.id == "tr_n"
+        self.assertEqual(set(used), set(ZH), "every string needs exactly one Chinese entry")
+        for english, counted in used.items():
+            extra = {"count"} if counted else set()
+            self.assertEqual(fields(english) | extra, fields(ZH[english]) | extra, english)
 
 
 if __name__ == "__main__":

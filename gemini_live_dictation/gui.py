@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 )
 
 from .cli import BLOCKSIZE, MODEL as LIVE_MODEL, SAMPLE_RATE, decode_file_to_pcm, read_vocabulary
+from .i18n import tr, tr_n
 
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
@@ -71,12 +72,15 @@ LIVE_PROCESSING_SPEED = 4
 MAX_PARALLEL_JOBS = 3
 MAX_ATTEMPTS = 4
 RETRY_BACKOFF_SECONDS = (10, 30, 60)
+# These classify error text from the server, the SDK and the OS; this app's own errors say
+# whether a retry can help through TranscriptionError.retryable instead of their wording.
 QUOTA_ERROR = re.compile(r"\b(429|409)\b|resource.?exhausted|quota|rate.?limit", re.IGNORECASE)
 TRANSIENT_ERROR = re.compile(
-    r"\b(1006|1011|1013|500|502|503|504)\b|unavailable|overloaded|deadline|timed? ?out|connection|连接|没有返回",
+    # 连接 ("connection") matches Windows socket errors reported in Chinese.
+    r"\b(1006|1011|1013|500|502|503|504)\b|unavailable|overloaded|deadline|timed? ?out|connection|连接",
     re.IGNORECASE,
 )
-FATAL_ERROR = re.compile(r"api.?key|permission|\b(400|401|403)\b|安全时长", re.IGNORECASE)
+FATAL_ERROR = re.compile(r"api.?key|permission|\b(400|401|403)\b", re.IGNORECASE)
 
 
 def clock_text(seconds: int) -> str:
@@ -99,11 +103,24 @@ def join_live_transcripts(parts: list[str]) -> str:
     return result
 
 
-def retry_delay(message: str, attempts: int) -> int | None:
-    """Seconds to wait before retrying a failed job, or None when retrying cannot help."""
-    if attempts >= MAX_ATTEMPTS or FATAL_ERROR.search(message):
+class TranscriptionError(RuntimeError):
+    """A failure this app detects itself; the message is shown in the UI language."""
+
+    def __init__(self, message: str, *, retryable: bool) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
+def retry_delay(message: str, attempts: int, retryable: bool | None = None) -> int | None:
+    """Seconds to wait before retrying a failed job, or None when retrying cannot help.
+
+    retryable comes from a TranscriptionError; None means the message is server or SDK text.
+    """
+    if attempts >= MAX_ATTEMPTS or retryable is False:
         return None
-    if not (QUOTA_ERROR.search(message) or TRANSIENT_ERROR.search(message)):
+    if retryable is None and (
+        FATAL_ERROR.search(message) or not (QUOTA_ERROR.search(message) or TRANSIENT_ERROR.search(message))
+    ):
         return None
     suggested = re.search(r"retry (?:in|after) (\d+(?:\.\d+)?)\s*s|retryDelay\W+(\d+)s", message, re.IGNORECASE)
     if suggested:
@@ -150,6 +167,7 @@ def microphone_options() -> list[Microphone]:
         raw_name = str(device["name"])
         if any(
             term in raw_name.lower()
+            # The last two are the Chinese Windows names of the first two.
             for term in ("sound mapper", "primary sound capture", "stereo mix", "line in", "声音映射", "主声音捕获")
         ):
             continue
@@ -213,7 +231,7 @@ class LocalRecorder:
 
     def _close_stream(self) -> None:
         if self.stream is None:
-            raise RuntimeError("录音尚未开始。")
+            raise RuntimeError(tr("Recording has not started."))
         try:
             self.stream.stop()
         finally:
@@ -229,7 +247,7 @@ class LocalRecorder:
     def finish(self) -> Path:
         self._close_stream()
         if not self.samples:
-            raise ValueError("没有录到声音，请检查麦克风选择。")
+            raise ValueError(tr("No sound was recorded; check the selected microphone."))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with wave.open(str(self.path), "wb") as recording:
             recording.setnchannels(1)
@@ -275,7 +293,7 @@ class AudioLevelMeter(QWidget):
 class BatchTranscribeWorker(QThread):
     status_changed = Signal(str)
     text_ready = Signal(str)
-    failed = Signal(str)
+    failed = Signal(str, object)  # Message, and TranscriptionError.retryable or None.
 
     def __init__(self, api_key: str, mode: str, audio_path: Path, vocabulary: list[str]) -> None:
         super().__init__()
@@ -287,9 +305,9 @@ class BatchTranscribeWorker(QThread):
     def run(self) -> None:
         try:
             client = genai.Client(api_key=self.api_key)
-            self.status_changed.emit("上传中…")
+            self.status_changed.emit(tr("Uploading…"))
             audio_file = client.files.upload(file=str(self.audio_path))
-            self.status_changed.emit("转写中…")
+            self.status_changed.emit(tr("Transcribing…"))
             mode = "smart" if self.mode == "SMART" else {"type": "verbatim"}
             interaction = client.interactions.create(
                 model=BATCH_MODEL,
@@ -310,10 +328,13 @@ class BatchTranscribeWorker(QThread):
             )
             text = (interaction.output_text or "").strip()
             if not text:
-                raise RuntimeError("Gemini 没有返回文字，请检查录音后重试。")
+                raise TranscriptionError(
+                    tr("Gemini returned no text; check the recording and try again."), retryable=True
+                )
             self.text_ready.emit(text)
         except Exception as error:
-            self.failed.emit(str(error).replace(self.api_key, "[hidden]"))
+            retryable = error.retryable if isinstance(error, TranscriptionError) else None
+            self.failed.emit(str(error).replace(self.api_key, "[hidden]"), retryable)
         finally:
             self.api_key = ""
 
@@ -323,7 +344,7 @@ class LiveReplayWorker(QThread):
 
     status_changed = Signal(str)
     text_ready = Signal(str)
-    failed = Signal(str)
+    failed = Signal(str, object)  # Message, and TranscriptionError.retryable or None.
 
     def __init__(self, api_key: str, mode: str, audio_path: Path, vocabulary: list[str]) -> None:
         super().__init__()
@@ -336,7 +357,8 @@ class LiveReplayWorker(QThread):
         try:
             asyncio.run(self._transcribe())
         except Exception as error:
-            self.failed.emit(str(error).replace(self.api_key, "[hidden]"))
+            retryable = error.retryable if isinstance(error, TranscriptionError) else None
+            self.failed.emit(str(error).replace(self.api_key, "[hidden]"), retryable)
         finally:
             self.api_key = ""
 
@@ -344,7 +366,10 @@ class LiveReplayWorker(QThread):
         pcm = decode_file_to_pcm(self.audio_path)
         audio_seconds = len(pcm) / (SAMPLE_RATE * 2)
         if audio_seconds > LIVE_RECORDING_SECONDS + 2:
-            raise ValueError("这段录音超过 Live 安全时长，请改用普通 Transcribe。")
+            raise TranscriptionError(
+                tr("This recording is longer than Live can safely handle; use Standard Transcribe instead."),
+                retryable=False,
+            )
         config = types.LiveConnectConfig(
             response_modalities=["TEXT"],
             input_audio_transcription=types.AudioTranscriptionConfig(
@@ -355,7 +380,7 @@ class LiveReplayWorker(QThread):
             ),
         )
         client = genai.Client(api_key=self.api_key)
-        self.status_changed.emit("连接中…")
+        self.status_changed.emit(tr("Connecting…"))
         final_parts: list[str] = []
         async with client.aio.live.connect(model=LIVE_MODEL, config=config) as session:
             async def receive() -> None:
@@ -379,10 +404,16 @@ class LiveReplayWorker(QThread):
                     if percent >= reported + 5:
                         reported = percent
                         remaining = max(0, round(estimate - (loop.time() - started)))
-                        self.status_changed.emit(f"发送中 {percent}% · 约剩 {clock_text(remaining)}")
+                        self.status_changed.emit(
+                            tr("Sending {percent}% · about {remaining} left", percent=percent,
+                               remaining=clock_text(remaining))
+                        )
                     if receiver.done():
                         await receiver
-                        raise RuntimeError("Live 连接在录音发送完之前关闭。")
+                        raise TranscriptionError(
+                            tr("Live closed the connection before the recording was fully sent."),
+                            retryable=True,
+                        )
                     audio_position = offset / (SAMPLE_RATE * 2)
                     send_at = started + max(0, audio_position - LIVE_HEAD_START_SECONDS) / LIVE_SEND_SPEED
                     await asyncio.sleep(max(0, send_at - loop.time()))
@@ -390,7 +421,7 @@ class LiveReplayWorker(QThread):
                         audio=types.Blob(data=pcm[offset : offset + chunk_size], mime_type=f"audio/pcm;rate={SAMPLE_RATE}")
                     )
                 await session.send_realtime_input(activity_end=types.ActivityEnd())
-                self.status_changed.emit("录音已送完，等待定稿…")
+                self.status_changed.emit(tr("Recording sent; waiting for the final text…"))
                 try:
                     await asyncio.wait_for(
                         asyncio.shield(receiver),
@@ -404,7 +435,10 @@ class LiveReplayWorker(QThread):
                     await receiver
         text = join_live_transcripts(final_parts)
         if not text:
-            raise RuntimeError("Live 没有返回最终文字；录音仍保存在本机。")
+            raise TranscriptionError(
+                tr("Live returned no final text; the recording is still saved on this computer."),
+                retryable=True,
+            )
         self.text_ready.emit(text)
 
 
@@ -430,6 +464,7 @@ class TranscriptionJob(QObject):
         self.progress = ""
         self.text = ""
         self.error = ""
+        self.retryable: bool | None = None  # See retry_delay().
         self.attempts = 0
         self.retry_at = 0.0
         self.retry_reason = ""
@@ -445,8 +480,9 @@ class TranscriptionJob(QObject):
         self.worker.finished.connect(self._worker_finished)
         self.attempts += 1
         self.state = "running"
-        self.progress = "准备中…"
+        self.progress = tr("Preparing…")
         self.error = ""
+        self.retryable = None
         self.worker.start()
         self.changed.emit()
 
@@ -457,8 +493,9 @@ class TranscriptionJob(QObject):
     def _set_text(self, text: str) -> None:
         self.text = text
 
-    def _set_error(self, message: str) -> None:
+    def _set_error(self, message: str, retryable: bool | None = None) -> None:
         self.error = message
+        self.retryable = retryable
 
     def _worker_finished(self) -> None:
         if self.worker is not None:
@@ -484,21 +521,24 @@ class VocabularyDialog(QDialog):
         terms = (line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#"))
         self.terms = sorted(dict.fromkeys(terms), key=vocabulary_sort_key)
 
-        self.setWindowTitle("个人词库 · 查看与编辑")
+        self.setWindowTitle(tr("Vocabulary · view and edit"))
         self.resize(460, 640)
         layout = QVBoxLayout(self)
-        hint = QLabel("按首字母排列。输入时即时筛选并提示重复；双击词条可修改，选中后按 Delete 删除。")
+        hint = QLabel(tr(
+            "Sorted alphabetically. Typing filters the list and flags duplicates; "
+            "double-click a term to edit it, or select terms and press Delete to remove them."
+        ))
         hint.setObjectName("muted")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
         entry_row = QHBoxLayout()
         self.entry = QLineEdit()
-        self.entry.setPlaceholderText("输入新词条，回车添加")
+        self.entry.setPlaceholderText(tr("Type a new term and press Enter to add it"))
         self.entry.textChanged.connect(self._filter)
         self.entry.returnPressed.connect(self._add)
         entry_row.addWidget(self.entry, 1)
-        self.add_button = QPushButton("添加")
+        self.add_button = QPushButton(tr("Add"))
         self.add_button.clicked.connect(self._add)
         entry_row.addWidget(self.add_button)
         layout.addLayout(entry_row)
@@ -516,14 +556,14 @@ class VocabularyDialog(QDialog):
         layout.addWidget(self.list, 1)
 
         buttons = QHBoxLayout()
-        delete = QPushButton("删除所选")
+        delete = QPushButton(tr("Delete selected"))
         delete.clicked.connect(self._delete_selected)
         buttons.addWidget(delete)
         buttons.addStretch()
-        cancel = QPushButton("取消")
+        cancel = QPushButton(tr("Cancel"))
         cancel.clicked.connect(self.reject)
         buttons.addWidget(cancel)
-        save = QPushButton("保存词库")
+        save = QPushButton(tr("Save vocabulary"))
         save.clicked.connect(self._save)
         buttons.addWidget(save)
         layout.addLayout(buttons)
@@ -555,12 +595,13 @@ class VocabularyDialog(QDialog):
         self.add_button.setEnabled(bool(query) and existing is None)
         self.feedback.setStyleSheet("color: #f0b86e;" if existing is not None else "")
         if existing is not None:
-            self.feedback.setText(f"已在个人词库中：{existing}")
+            self.feedback.setText(tr("Already in your vocabulary: {term}", term=existing))
             self.list.setCurrentRow(self.terms.index(existing))
         elif query:
-            self.feedback.setText(f"没有重复 · 有 {matches} 项包含这段文字")
+            self.feedback.setText(tr_n("No duplicate · 1 term contains this text",
+                                       "No duplicate · {count} terms contain this text", matches))
         else:
-            self.feedback.setText(f"共 {len(self.terms)} 项")
+            self.feedback.setText(tr_n("1 term", "{count} terms", len(self.terms)))
 
     def _add(self) -> None:
         term = self.entry.text().strip()
@@ -569,17 +610,20 @@ class VocabularyDialog(QDialog):
         self.entry.clear()  # Clear first: this re-filters the list before the new term exists.
         self.terms.append(term)
         self._render(select=term)
-        self.feedback.setText(f"已添加：{term} · 共 {len(self.terms)} 项")
+        self.feedback.setText(tr_n("Added: {term} · 1 term", "Added: {term} · {count} terms", len(self.terms),
+                                    term=term))
 
     def _edit(self, item: QListWidgetItem) -> None:
         old = item.text()
-        new, ok = QInputDialog.getText(self, "修改词条", "词条：", text=old)
+        new, ok = QInputDialog.getText(self, tr("Edit term"), tr("Term:"), text=old)
         new = new.strip()
         if not ok or not new or new == old:
             return
         existing = self._existing(new, ignore=old)
         if existing is not None:
-            QMessageBox.information(self, "重复词条", f"个人词库中已经有：{existing}")
+            QMessageBox.information(
+                self, tr("Duplicate term"), tr("Your vocabulary already has: {term}", term=existing)
+            )
             return
         self.terms[self.terms.index(old)] = new
         self._render(select=new)
@@ -593,17 +637,20 @@ class VocabularyDialog(QDialog):
 
     def _save(self) -> None:
         if len(self.terms) > 1000:
-            QMessageBox.warning(self, "词库太长", "Gemini 最多接受 1000 个不同的词条。")
+            QMessageBox.warning(self, tr("Vocabulary too long"), tr("Gemini accepts at most 1,000 distinct terms."))
             return
         try:
             current_text = self.path.read_text(encoding="utf-8") if self.path.is_file() else None
             if current_text != self.original_text:
-                QMessageBox.warning(self, "词库已更改", "词库文件已被其他设备或程序修改。请关闭并重新打开词库后再编辑。")
+                QMessageBox.warning(self, tr("Vocabulary changed"), tr(
+                    "The vocabulary file was changed by another device or program. "
+                    "Close and reopen the vocabulary before editing."
+                ))
                 return
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text("\n".join(self.comments + self.terms) + "\n", encoding="utf-8")
         except OSError as error:
-            QMessageBox.critical(self, "保存失败", str(error))
+            QMessageBox.critical(self, tr("Save failed"), str(error))
             return
         self.accept()
 
@@ -692,7 +739,10 @@ class DictationWindow(QWidget):
         title = QLabel("Gemini Dictation")
         title.setObjectName("title")
         root.addWidget(title)
-        intro = QLabel("先在本机录音，结束后才发送；每段在后台转写，录完一段就可以接着录下一段。")
+        intro = QLabel(tr(
+            "Records on this computer and sends only when you stop; "
+            "each recording is transcribed in the background while you record the next."
+        ))
         intro.setObjectName("muted")
         root.addWidget(intro)
 
@@ -702,15 +752,15 @@ class DictationWindow(QWidget):
         settings_layout = QVBoxLayout(settings)
         settings_layout.setContentsMargins(20, 16, 20, 18)
         settings_layout.setSpacing(8)
-        section = QLabel("基本设置")
+        section = QLabel(tr("Settings"))
         section.setObjectName("section")
         settings_layout.addWidget(section)
 
         key_row = QHBoxLayout()
         self.key_input = QLineEdit()
         self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.key_input.setPlaceholderText("粘贴 API key，点击保存（仅保存在本机）")
-        self.save_key_button = QPushButton("保存 Key")
+        self.key_input.setPlaceholderText(tr("Paste your Gemini API key and click Save (stored only on this computer)"))
+        self.save_key_button = QPushButton(tr("Save key"))
         self.save_key_button.clicked.connect(self._save_key)
         key_row.addWidget(self.key_input, 1)
         key_row.addWidget(self.save_key_button)
@@ -725,28 +775,28 @@ class DictationWindow(QWidget):
         choices = QHBoxLayout(choices_container)
         choices.setContentsMargins(0, 0, 0, 0)
         mode_column = QVBoxLayout()
-        mode_label = QLabel("转写模式")
+        mode_label = QLabel(tr("Transcription mode"))
         mode_label.setObjectName("muted")
         self.mode_combo = QComboBox()
-        self.mode_combo.addItem("VERBATIM · 保留原话和纠正", "VERBATIM")
-        self.mode_combo.addItem("SMART · 自动整理语句", "SMART")
+        self.mode_combo.addItem(tr("VERBATIM · keeps wording and corrections"), "VERBATIM")
+        self.mode_combo.addItem(tr("SMART · tidies up sentences"), "SMART")
         mode_column.addWidget(mode_label)
         mode_column.addWidget(self.mode_combo)
         choices.addLayout(mode_column, 1)
 
         engine_column = QVBoxLayout()
-        engine_label = QLabel("转写引擎")
+        engine_label = QLabel(tr("Transcription engine"))
         engine_label.setObjectName("muted")
         self.engine_combo = QComboBox()
-        self.engine_combo.addItem("Transcribe Live · 推荐", "LIVE")
-        self.engine_combo.addItem("普通 Transcribe · 整段", "BATCH")
+        self.engine_combo.addItem(tr("Transcribe Live · recommended"), "LIVE")
+        self.engine_combo.addItem(tr("Standard Transcribe · whole file"), "BATCH")
         self.engine_combo.currentIndexChanged.connect(self._update_limit_hint)
         engine_column.addWidget(engine_label)
         engine_column.addWidget(self.engine_combo)
         choices.addLayout(engine_column, 1)
 
         mic_column = QVBoxLayout()
-        mic_label = QLabel("麦克风")
+        mic_label = QLabel(tr("Microphone"))
         mic_label.setObjectName("muted")
         self.mic_combo = QComboBox()
         self.mic_combo.setView(QListView())
@@ -765,10 +815,10 @@ class DictationWindow(QWidget):
         self.vocabulary_status = QLabel()
         self.vocabulary_status.setObjectName("muted")
         vocab_row.addWidget(self.vocabulary_status, 1)
-        self.vocabulary_button = QPushButton("查看 / 编辑词库")
+        self.vocabulary_button = QPushButton(tr("View / edit vocabulary"))
         self.vocabulary_button.clicked.connect(self._show_vocabulary)
         vocab_row.addWidget(self.vocabulary_button)
-        choose_vocabulary = QPushButton("选择词库文件")
+        choose_vocabulary = QPushButton(tr("Choose vocabulary file"))
         choose_vocabulary.clicked.connect(self._choose_vocabulary)
         vocab_row.addWidget(choose_vocabulary)
         settings_layout.addLayout(vocab_row)
@@ -776,23 +826,23 @@ class DictationWindow(QWidget):
         root.addSpacing(8)
 
         action_row = QHBoxLayout()
-        self.record_button = QPushButton("开始录音")
+        self.record_button = QPushButton(tr("Start recording"))
         self.record_button.setObjectName("record")
         self.record_button.clicked.connect(self._toggle_recording)
         self.record_button.setMinimumWidth(180)
         action_row.addWidget(self.record_button)
-        self.next_button = QPushButton("提交，录下一段")
-        self.next_button.setToolTip("提交当前这段去转写，并立刻开始录下一段")
+        self.next_button = QPushButton(tr("Submit, record next"))
+        self.next_button.setToolTip(tr("Send this recording for transcription and start the next one right away"))
         self.next_button.clicked.connect(self._submit_and_record_next)
         self.next_button.setVisible(False)
         action_row.addWidget(self.next_button)
-        self.discard_button = QPushButton("× 放弃本段")
+        self.discard_button = QPushButton(tr("× Discard"))
         self.discard_button.setObjectName("discard")
-        self.discard_button.setToolTip("扔掉正在录的这段：不保存录音，也不发送给 Gemini")
+        self.discard_button.setToolTip(tr("Throw away the current recording: it is neither saved nor sent to Gemini"))
         self.discard_button.clicked.connect(self._discard_recording)
         self.discard_button.setVisible(False)
         action_row.addWidget(self.discard_button)
-        self.status_label = QLabel("准备就绪")
+        self.status_label = QLabel(tr("Ready"))
         self.status_label.setObjectName("muted")
         action_row.addWidget(self.status_label, 1)
         self.timer_label = QLabel("00:00 / 08:30")
@@ -800,16 +850,17 @@ class DictationWindow(QWidget):
         root.addLayout(action_row)
 
         meter_row = QHBoxLayout()
-        level_label = QLabel("麦克风声量")
+        level_label = QLabel(tr("Mic level"))
         level_label.setObjectName("muted")
         meter_row.addWidget(level_label)
         self.level_meter = AudioLevelMeter()
         meter_row.addWidget(self.level_meter, 1)
-        self.level_status = QLabel("录音时显示")
+        self.level_status = QLabel(tr("Shown while recording"))
         self.level_status.setObjectName("muted")
         self.level_status.setFixedWidth(
             max(self.level_status.fontMetrics().horizontalAdvance(message) for message in (
-                "录音时显示", "正在拾音", "声音偏小 / 安静", "录音已结束"
+                tr("Shown while recording"), tr("Picking up sound"), tr("Quiet / low level"),
+                tr("Recording finished"),
             )) + 8
         )
         self.level_status.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -822,21 +873,21 @@ class DictationWindow(QWidget):
         transcript_layout.setContentsMargins(20, 16, 20, 18)
         transcript_layout.setSpacing(10)
         transcript_header = QHBoxLayout()
-        heading = QLabel("转写结果")
+        heading = QLabel(tr("Transcripts"))
         heading.setObjectName("section")
         transcript_header.addWidget(heading)
         self.queue_label = QLabel()
         self.queue_label.setObjectName("muted")
         transcript_header.addWidget(self.queue_label)
         transcript_header.addStretch()
-        self.retry_button = QPushButton("重试")
+        self.retry_button = QPushButton(tr("Retry"))
         self.retry_button.clicked.connect(self._retry_selected)
         transcript_header.addWidget(self.retry_button)
-        self.copy_button = QPushButton("复制本段")
+        self.copy_button = QPushButton(tr("Copy"))
         self.copy_button.clicked.connect(self._copy_text)
         transcript_header.addWidget(self.copy_button)
-        self.copy_all_button = QPushButton("复制全部")
-        self.copy_all_button.setToolTip("按录音顺序复制所有已完成的段落")
+        self.copy_all_button = QPushButton(tr("Copy all"))
+        self.copy_all_button.setToolTip(tr("Copy every finished transcript in recording order"))
         self.copy_all_button.clicked.connect(self._copy_all)
         transcript_header.addWidget(self.copy_all_button)
         transcript_layout.addLayout(transcript_header)
@@ -858,12 +909,17 @@ class DictationWindow(QWidget):
         list_column.addWidget(self.job_list, 1)
         list_buttons = QHBoxLayout()
         list_buttons.setSpacing(8)
-        self.remove_button = QPushButton("移除所选")
-        self.remove_button.setToolTip("只从列表中移除（也可按 Delete，可多选）；录音和转写文件仍保存在本机")
+        self.remove_button = QPushButton(tr("Remove selected"))
+        self.remove_button.setToolTip(tr(
+            "Remove from the list only (or press Delete; multiple selection works); "
+            "recordings and transcript files stay on this computer"
+        ))
         self.remove_button.clicked.connect(self._remove_selected)
         list_buttons.addWidget(self.remove_button)
-        self.clear_done_button = QPushButton("清除已完成")
-        self.clear_done_button.setToolTip("从列表中移除所有已完成的段落；文件仍保存在本机")
+        self.clear_done_button = QPushButton(tr("Clear finished"))
+        self.clear_done_button.setToolTip(
+            tr("Remove all finished recordings from the list; files stay on this computer")
+        )
         self.clear_done_button.clicked.connect(self._clear_done)
         list_buttons.addWidget(self.clear_done_button)
         list_column.addLayout(list_buttons)
@@ -871,7 +927,9 @@ class DictationWindow(QWidget):
         self.transcript = QPlainTextEdit()
         self.transcript.setMinimumHeight(120)
         self.transcript.setReadOnly(True)
-        self.transcript.setPlaceholderText("结束录音并完成整段转写后，文字会出现在这里。")
+        self.transcript.setPlaceholderText(
+            tr("Stop recording, and the text appears here once the whole recording is transcribed.")
+        )
         self.transcript.textChanged.connect(self._transcript_edited)
         body.addWidget(self.transcript, 1)
         transcript_layout.addLayout(body, 1)
@@ -883,7 +941,10 @@ class DictationWindow(QWidget):
         transcript_layout.addWidget(self.detail_label)
         root.addWidget(transcript_card, 1)
 
-        footer = QLabel("结束录音后，音频和个人词库中的词条会发送给 Gemini；API key、录音和转写文件不会提交到 Git。")
+        footer = QLabel(tr(
+            "Finished recordings and your vocabulary terms are sent to Gemini; "
+            "the API key, recordings and transcripts are never committed to Git."
+        ))
         footer.setObjectName("muted")
         root.addWidget(footer)
         self._update_limit_hint()
@@ -894,11 +955,17 @@ class DictationWindow(QWidget):
         return LIVE_RECORDING_SECONDS if self.engine_combo.currentData() == "LIVE" else BATCH_RECORDING_SECONDS
 
     def _update_limit_hint(self) -> None:
-        parallel = f"最多同时转写 {MAX_PARALLEL_JOBS} 段，其余排队，限流时自动重试"
+        parallel = tr("{count} transcribe at once, others queue and retry if rate-limited", count=MAX_PARALLEL_JOBS)
         if self.engine_combo.currentData() == "LIVE":
-            self.limit_label.setText(f"Live 每段上限 08:30（会话限 10 分钟），到时自动提交；{parallel}。")
+            self.limit_label.setText(
+                tr("Live: up to 08:30 per recording (10-min session), then auto-submits; {parallel}.",
+                   parallel=parallel)
+            )
         else:
-            self.limit_label.setText(f"普通 Transcribe 每段最多 20 分钟，受每分钟 / 每天请求额度限制；{parallel}。")
+            self.limit_label.setText(
+                tr("Standard: up to 20 min per recording, per-minute/daily quotas apply; {parallel}.",
+                   parallel=parallel)
+            )
         if self.recorder is None:
             self.timer_label.setText(f"00:00 / {clock_text(self._recording_limit())}")
 
@@ -910,60 +977,68 @@ class DictationWindow(QWidget):
                 self.mic_combo.addItem(option.name, option.index)
                 self.mic_combo.setItemData(
                     self.mic_combo.count() - 1,
-                    f"{option.host_api} · {option.sample_rate} Hz · 录音时再次确认设备可打开",
+                    tr("{host_api} · {sample_rate} Hz · checked again when recording starts",
+                       host_api=option.host_api, sample_rate=option.sample_rate),
                     Qt.ItemDataRole.ToolTipRole,
                 )
                 if option.name in default_name:
                     self.mic_combo.setCurrentIndex(self.mic_combo.count() - 1)
-            self.mic_status.setText(f"已验证 {len(self.microphones)} 个当前可打开的麦克风。")
+            self.mic_status.setText(tr_n("Verified 1 microphone that can be opened now.",
+                                         "Verified {count} microphones that can be opened now.",
+                                         len(self.microphones)))
         except Exception as error:
-            self.mic_status.setText(f"无法检查麦克风：{error}")
+            self.mic_status.setText(tr("Could not check microphones: {error}", error=error))
         if not self.mic_combo.count():
             self.record_button.setEnabled(False)
 
     def _refresh_key_status(self) -> None:
         if saved_api_key():
-            state = "本次转写已成功验证" if self.key_verified else "已从本机读取；尚未向 Google 验证"
-            self.key_status.setText(f"API key：{state}")
+            if self.key_verified:
+                self.key_status.setText(tr("API key: verified by a successful transcription"))
+            else:
+                self.key_status.setText(tr("API key: loaded from this computer; not yet verified with Google"))
         else:
-            self.key_status.setText("API key：尚未设置")
+            self.key_status.setText(tr("API key: not set"))
         try:
             if self.vocabulary_path != VOCABULARY_PATH and not self.vocabulary_path.is_file():
-                raise FileNotFoundError(f"找不到词库文件：{self.vocabulary_path}")
+                raise FileNotFoundError(tr("Vocabulary file not found: {path}", path=self.vocabulary_path))
             count = len(read_vocabulary(self.vocabulary_path)) if self.vocabulary_path.is_file() else 0
-            self.vocabulary_status.setText(f"个人词库：{count} 项 · {self.vocabulary_path}")
+            self.vocabulary_status.setText(
+                tr_n("Vocabulary: 1 term · {path}", "Vocabulary: {count} terms · {path}", count, path=self.vocabulary_path)
+            )
         except Exception as error:
-            self.vocabulary_status.setText(f"个人词库需要检查：{error}")
+            self.vocabulary_status.setText(tr("Vocabulary needs checking: {error}", error=error))
 
     def _save_key(self) -> None:
         key = self.key_input.text().strip()
         if not key:
-            QMessageBox.information(self, "API key", "请先输入要保存的 API key。")
+            QMessageBox.information(self, "API key", tr("Enter the API key you want to save first."))
             return
         try:
             set_key(str(ENV_PATH), "GEMINI_API_KEY", key, quote_mode="auto")
         except OSError as error:
-            QMessageBox.critical(self, "保存失败", str(error))
+            QMessageBox.critical(self, tr("Save failed"), str(error))
             return
         self.key_input.clear()
         self.key_verified = False
         self._refresh_key_status()
-        self.status_label.setText("API key 已保存到本机，等待首次转写验证")
+        self.status_label.setText(tr("API key saved on this computer; the first transcription will verify it"))
         self._dispatch_jobs()
 
     def _show_vocabulary(self) -> None:
         try:
             dialog = VocabularyDialog(self, self.vocabulary_path)
         except OSError as error:
-            QMessageBox.critical(self, "无法读取词库", str(error))
+            QMessageBox.critical(self, tr("Cannot read vocabulary"), str(error))
             return
         if dialog.exec():
             self._refresh_key_status()
-            self.status_label.setText("个人词库已更新，下次录音生效")
+            self.status_label.setText(tr("Vocabulary updated; it applies from the next recording"))
 
     def _choose_vocabulary(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
-            self, "选择 Google Drive 桌面版同步的词库文本文件", str(self.vocabulary_path.parent), "文本文件 (*.txt);;所有文件 (*)"
+            self, tr("Choose the vocabulary text file synced by Google Drive for desktop"),
+            str(self.vocabulary_path.parent), tr("Text files (*.txt);;All files (*)"),
         )
         if selected:
             self.vocabulary_path = Path(selected)
@@ -992,31 +1067,33 @@ class DictationWindow(QWidget):
         self._reset_controls()
         self.level_meter.clear()
         self.timer_label.setText(f"00:00 / {clock_text(self._recording_limit())}")
-        self.status_label.setText("已放弃这段录音 · 没有保存，也没有发送")
+        self.status_label.setText(tr("Recording discarded · nothing was saved or sent"))
 
     def _start_recording(self) -> None:
         if not saved_api_key():
-            QMessageBox.information(self, "需要 API key", "请先填写并保存 API key。")
+            QMessageBox.information(self, tr("API key required"), tr("Enter and save your Gemini API key first."))
             self.key_input.setFocus()
             return
         try:
             if self.vocabulary_path != VOCABULARY_PATH and not self.vocabulary_path.is_file():
-                raise FileNotFoundError(f"找不到词库文件：{self.vocabulary_path}")
+                raise FileNotFoundError(tr("Vocabulary file not found: {path}", path=self.vocabulary_path))
             vocabulary = read_vocabulary(self.vocabulary_path) if self.vocabulary_path.is_file() else []
         except (OSError, ValueError) as error:
-            QMessageBox.critical(self, "个人词库错误", str(error))
+            QMessageBox.critical(self, tr("Vocabulary error"), str(error))
             return
         selected_index = self.mic_combo.currentData()
         microphone = next((item for item in self.microphones if item.index == selected_index), None)
         if microphone is None:
-            QMessageBox.critical(self, "麦克风", "没有找到可用的麦克风。")
+            QMessageBox.critical(self, tr("Microphone"), tr("No usable microphone was found."))
             return
         recording_path = RECORDINGS_DIR / f"recording-{datetime.now():%Y%m%d-%H%M%S-%f}.wav"
         recorder = LocalRecorder(microphone, recording_path)
         try:
             recorder.start()
         except Exception as error:
-            QMessageBox.critical(self, "麦克风无法打开", f"这个设备目前不能录音：{error}")
+            QMessageBox.critical(
+                self, tr("Microphone unavailable"), tr("This device cannot record right now: {error}", error=error)
+            )
             return
         self.recorder = recorder
         self._session_vocabulary = vocabulary
@@ -1024,7 +1101,7 @@ class DictationWindow(QWidget):
         self._session_engine = self.engine_combo.currentData()
         self.elapsed_seconds = 0
         self.timer_label.setText(f"00:00 / {clock_text(self._recording_limit())}")
-        self.record_button.setText("结束并提交")
+        self.record_button.setText(tr("Stop and submit"))
         self.record_button.setProperty("recording", True)
         self.record_button.style().unpolish(self.record_button)
         self.record_button.style().polish(self.record_button)
@@ -1034,10 +1111,11 @@ class DictationWindow(QWidget):
         self.engine_combo.setEnabled(False)
         self.mic_combo.setEnabled(False)
         self.vocabulary_button.setEnabled(False)
-        self.status_label.setText(f"正在录第 {self.next_job_number} 段 · 仅在本机，尚未发送")
+        self.status_label.setText(tr("Recording {number} · on this computer only, not sent yet",
+                                      number=self.next_job_number))
         self.timer.start()
         self.level_meter.clear()
-        self.level_status.setText("正在拾音")
+        self.level_status.setText(tr("Picking up sound"))
         self.level_timer.start()
 
     def _stop_recording(self) -> bool:
@@ -1051,7 +1129,7 @@ class DictationWindow(QWidget):
             audio_path = recorder.finish()
         except Exception as error:
             self._reset_controls()
-            QMessageBox.critical(self, "录音失败", str(error))
+            QMessageBox.critical(self, tr("Recording failed"), str(error))
             return False
         job = TranscriptionJob(
             self.next_job_number, audio_path, self._session_engine, self._session_mode,
@@ -1068,8 +1146,8 @@ class DictationWindow(QWidget):
         if self._selected_job() is None:
             self.job_list.setCurrentItem(item)
         self._reset_controls()
-        self.level_status.setText("录音已结束")
-        self.status_label.setText(f"第 {job.number} 段已提交转写 · 可以直接录下一段")
+        self.level_status.setText(tr("Recording finished"))
+        self.status_label.setText(tr("Recording {number} submitted · you can record the next one", number=job.number))
         self._dispatch_jobs()
         return True
 
@@ -1078,14 +1156,14 @@ class DictationWindow(QWidget):
         limit = self._recording_limit()
         self.timer_label.setText(f"{clock_text(self.elapsed_seconds)} / {clock_text(limit)}")
         if limit - self.elapsed_seconds == 30:
-            self.status_label.setText("还剩 30 秒，届时会自动结束录音并提交")
+            self.status_label.setText(tr("30 seconds left, then it stops and submits"))
         if self.elapsed_seconds >= limit and self.recorder is not None:
             self._stop_recording()
 
     def _update_level(self) -> None:
         if self.recorder is not None:
             self.level_meter.push_level(self.recorder.level)
-            self.level_status.setText("正在拾音" if self.recorder.level > 5 else "声音偏小 / 安静")
+            self.level_status.setText(tr("Picking up sound") if self.recorder.level > 5 else tr("Quiet / low level"))
 
     def _active_jobs(self) -> list[TranscriptionJob]:
         return [job for job in self.jobs if job.state in ("queued", "running", "retry")]
@@ -1104,7 +1182,7 @@ class DictationWindow(QWidget):
                 for job in waiting[: MAX_PARALLEL_JOBS - running]:
                     job.start(key)
             else:
-                self.status_label.setText("API key 未设置；保存 Key 后开始转写排队的录音")
+                self.status_label.setText(tr("API key not set; save a key to start transcribing the queued recordings"))
         self._refresh_jobs()
 
     def _job_settled(self, job: TranscriptionJob) -> None:
@@ -1117,28 +1195,35 @@ class DictationWindow(QWidget):
                 # The text is safely on disk, so the recording has served its purpose.
                 with suppress(OSError):
                     job.audio_path.unlink(missing_ok=True)
-                self.status_label.setText(f"第 {job.number} 段转写完成，已保存在本机")
+                self.status_label.setText(
+                    tr("Recording {number} transcribed and saved on this computer", number=job.number)
+                )
             else:
-                self.status_label.setText(f"第 {job.number} 段转写完成，但保存失败")
+                self.status_label.setText(tr("Recording {number} transcribed, but saving failed", number=job.number))
             self._mark_key_verified()
             # Follow new results unless the user went back to an older one or is editing.
             if follow and not self.transcript.hasFocus():
                 self.job_list.setCurrentItem(self._job_item(job))
         else:
-            job.error = job.error or "没有收到文字。"
-            delay = retry_delay(job.error, job.attempts)
+            if not job.error:
+                job.error, job.retryable = tr("No text was received."), False
+            delay = retry_delay(job.error, job.attempts, job.retryable)
             if delay is None:
                 job.state = "failed"
-                self.status_label.setText(f"第 {job.number} 段转写失败；录音仍保存在本机，可点“重试”")
+                self.status_label.setText(tr("Recording {number} failed · audio kept on this computer, click “Retry”",
+                                          number=job.number))
             else:
                 job.state = "retry"
                 job.retry_at = time.monotonic() + delay
-                if QUOTA_ERROR.search(job.error):
+                if job.retryable is None and QUOTA_ERROR.search(job.error):
                     self.cooldown_until = max(self.cooldown_until, job.retry_at)
-                    job.retry_reason = "额度限流"
+                    job.retry_reason = tr("rate-limited")
                 else:
-                    job.retry_reason = "连接中断"
-                self.status_label.setText(f"第 {job.number} 段遇到{job.retry_reason}，{delay} 秒后自动重试")
+                    job.retry_reason = tr("connection lost")
+                self.status_label.setText(
+                    tr("Recording {number}: {reason}, retrying in {delay} s", number=job.number,
+                       reason=job.retry_reason, delay=delay)
+                )
         self._dispatch_jobs()
         if self._selected_job() is job:
             self._show_selected_job()
@@ -1151,7 +1236,7 @@ class DictationWindow(QWidget):
             job.transcript_path.write_text(job.text.strip() + "\n", encoding="utf-8")
             return True
         except OSError as error:
-            job.error = f"保存失败：{error}"
+            job.error = tr("Save failed: {error}", error=error)
             return False
 
     def _latest_done_job(self) -> TranscriptionJob | None:
@@ -1169,7 +1254,8 @@ class DictationWindow(QWidget):
         return self._item_job(item) if item else None
 
     def _job_row_text(self, job: TranscriptionJob, now: float) -> tuple[str, str]:
-        header = f"第 {job.number} 段 · {job.created:%H:%M:%S} · 录音 {clock_text(job.seconds)}"
+        header = tr("Recording {number} · {time} · length {length}", number=job.number,
+                    time=f"{job.created:%H:%M:%S}", length=clock_text(job.seconds))
         if job.state == "done":
             preview = " ".join(job.text.split())
             return f"{header}\n✓ {preview[:15]}{'…' if len(preview) > 15 else ''}", "#9fe3d5"
@@ -1177,12 +1263,15 @@ class DictationWindow(QWidget):
             return f"{header}\n{job.progress}", "#e9f0f7"
         if job.state == "retry":
             wait = clock_text(max(0, math.ceil(job.retry_at - now)))
-            return f"{header}\n{job.retry_reason} · {wait} 后第 {job.attempts + 1} 次尝试", "#f0b86e"
+            retry = tr("{reason} · attempt {attempt} in {wait}", reason=job.retry_reason,
+                       attempt=job.attempts + 1, wait=wait)
+            return f"{header}\n{retry}", "#f0b86e"
         if job.state == "failed":
-            return f"{header}\n× 转写失败 · 可点“重试”", "#ed7777"
+            return f"{header}\n{tr('× Transcription failed · click “Retry”')}", "#ed7777"
         if self.cooldown_until > now:
-            return f"{header}\n排队中 · 限流冷却 {clock_text(math.ceil(self.cooldown_until - now))}", "#f0b86e"
-        return f"{header}\n排队中 · 等待空位", "#9fb0c5"
+            cooldown = tr("Queued · rate-limit cooldown {wait}", wait=clock_text(math.ceil(self.cooldown_until - now)))
+            return f"{header}\n{cooldown}", "#f0b86e"
+        return f"{header}\n{tr('Queued · waiting for a free slot')}", "#9fb0c5"
 
     def _refresh_jobs(self) -> None:
         now = time.monotonic()
@@ -1195,9 +1284,10 @@ class DictationWindow(QWidget):
                 item.setToolTip(job.error)
         counts = {state: sum(job.state == state for job in self.jobs) for state in ("running", "done")}
         waiting = sum(job.state in ("queued", "retry") for job in self.jobs)
-        summary = f"转写中 {counts['running']} · 排队 {waiting} · 完成 {counts['done']}"
+        summary = tr("Transcribing {running} · queued {waiting} · done {done}", running=counts["running"],
+                     waiting=waiting, done=counts["done"])
         if self.cooldown_until > now and waiting:
-            summary += f" · 限流冷却 {clock_text(math.ceil(self.cooldown_until - now))}"
+            summary += tr(" · rate-limit cooldown {wait}", wait=clock_text(math.ceil(self.cooldown_until - now)))
         self.queue_label.setText(summary if self.jobs else "")
         self._update_job_buttons()
 
@@ -1206,7 +1296,7 @@ class DictationWindow(QWidget):
         self.copy_button.setEnabled(job is not None and job.state == "done" and bool(job.text.strip()))
         self.copy_all_button.setEnabled(any(job.state == "done" for job in self.jobs))
         self.retry_button.setVisible(job is not None and job.state in ("retry", "failed"))
-        self.retry_button.setText("立即重试" if job is not None and job.state == "retry" else "重试")
+        self.retry_button.setText(tr("Retry now") if job is not None and job.state == "retry" else tr("Retry"))
         selected = [self._item_job(item) for item in self.job_list.selectedItems()]
         self.remove_button.setEnabled(any(job.state in ("done", "failed") for job in selected))
         self.clear_done_button.setEnabled(any(job.state == "done" for job in self.jobs))
@@ -1218,24 +1308,34 @@ class DictationWindow(QWidget):
         self.transcript.setPlainText(job.text if job and job.state == "done" else "")
         self.transcript.setReadOnly(job is None or job.state != "done")
         if job is None:
-            self.transcript.setPlaceholderText("结束录音并完成整段转写后，文字会出现在这里。")
-            self.detail_label.setText(
-                "录完一段就提交，不必等待转写，可以马上录下一段；每段独立转写，完成后在左侧列表中查看。"
+            self.transcript.setPlaceholderText(
+                tr("Stop recording, and the text appears here once the whole recording is transcribed.")
             )
+            self.detail_label.setText(tr(
+                "Submit each recording when you finish it and start the next one without waiting; "
+                "each is transcribed separately and shows up in the list on the left."
+            ))
         elif job.state == "done":
-            saved = job.error or f"已保存在本机：transcripts/{job.transcript_path.name}"
-            self.detail_label.setText(f"第 {job.number} 段 · {saved}。可以直接修改后复制。")
+            saved = job.error or tr("Saved on this computer: transcripts/{name}", name=job.transcript_path.name)
+            self.detail_label.setText(tr("Recording {number} · {saved}. You can edit the text before copying.",
+                                         number=job.number, saved=saved))
         elif job.state == "failed":
             self.transcript.setPlaceholderText(
-                f"这一段没有转写成功，可以点“重试”。\n\n失败原因：{job.error}"
+                tr("This recording was not transcribed; click “Retry”.\n\nReason: {error}", error=job.error)
             )
-            self.detail_label.setText(f"录音仍保存在本机：recordings/{job.audio_path.name}")
+            self.detail_label.setText(
+                tr("Recording kept on this computer: recordings/{name}", name=job.audio_path.name)
+            )
         else:
-            last_error = f"\n\n上次尝试：{job.error}" if job.error else ""
-            self.transcript.setPlaceholderText(
-                f"这一段正在后台转写，完成后会显示在这里。你可以继续录下一段。{last_error}"
+            last_error = tr("\n\nLast attempt: {error}", error=job.error) if job.error else ""
+            self.transcript.setPlaceholderText(tr(
+                "This recording is being transcribed in the background and will appear here. "
+                "You can go on recording the next one.{last_error}", last_error=last_error
+            ))
+            self.detail_label.setText(
+                tr("Recording stored on this computer until it is transcribed, then deleted: recordings/{name}",
+                   name=job.audio_path.name)
             )
-            self.detail_label.setText(f"录音暂存在本机，转写完成后自动删除：recordings/{job.audio_path.name}")
         self.detail_label.setToolTip(self.detail_label.text())
         self._update_job_buttons()
 
@@ -1263,16 +1363,21 @@ class DictationWindow(QWidget):
         if not removable:
             return
         self._remove_jobs(removable)
-        message = f"已从列表移除 {len(removable)} 段 · 录音和转写文件仍在本机"
+        message = tr_n("Removed 1 from the list · files kept on this computer",
+                       "Removed {count} from the list · files kept on this computer", len(removable))
         if len(selected) > len(removable):
-            message += f"；{len(selected) - len(removable)} 段还在转写，未移除"
+            message += tr_n("; 1 still transcribing, not removed", "; {count} still transcribing, not removed",
+                            len(selected) - len(removable))
         self.status_label.setText(message)
 
     def _clear_done(self) -> None:
         done = [job for job in self.jobs if job.state == "done"]
         if done:
             self._remove_jobs(done)
-            self.status_label.setText(f"已清除 {len(done)} 段已完成的记录 · 转写文件仍在 transcripts/")
+            self.status_label.setText(tr_n(
+                "Cleared 1 finished recording · transcripts remain in transcripts/",
+                "Cleared {count} finished recordings · transcripts remain in transcripts/", len(done),
+            ))
 
     def _remove_jobs(self, jobs: list[TranscriptionJob]) -> None:
         self.job_list.blockSignals(True)  # Rows and jobs are briefly out of step while removing.
@@ -1293,7 +1398,7 @@ class DictationWindow(QWidget):
 
     def _reset_controls(self) -> None:
         self.record_button.setEnabled(bool(self.microphones) and not self.close_when_finished)
-        self.record_button.setText("开始录音")
+        self.record_button.setText(tr("Start recording"))
         self.record_button.setProperty("recording", False)
         self.record_button.style().unpolish(self.record_button)
         self.record_button.style().polish(self.record_button)
@@ -1303,16 +1408,17 @@ class DictationWindow(QWidget):
         self.engine_combo.setEnabled(True)
         self.mic_combo.setEnabled(True)
         self.vocabulary_button.setEnabled(True)
-        self.level_status.setText("录音时显示")
+        self.level_status.setText(tr("Shown while recording"))
 
     def _copy_text(self) -> None:
         QApplication.clipboard().setText(self.transcript.toPlainText())
-        self.status_label.setText("已复制本段到剪贴板")
+        self.status_label.setText(tr("Copied to the clipboard"))
 
     def _copy_all(self) -> None:
         done = [job.text.strip() for job in self.jobs if job.state == "done" and job.text.strip()]
         QApplication.clipboard().setText("\n\n".join(done))
-        self.status_label.setText(f"已按录音顺序复制 {len(done)} 段到剪贴板")
+        self.status_label.setText(tr_n("Copied 1 transcript to the clipboard",
+                                       "Copied {count} transcripts to the clipboard in recording order", len(done)))
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.recorder is not None:
@@ -1328,7 +1434,10 @@ class DictationWindow(QWidget):
         if active:
             self.close_when_finished = True
             self.record_button.setEnabled(False)
-            self.status_label.setText(f"还有 {len(active)} 段在转写，完成后自动关闭窗口…")
+            self.status_label.setText(tr_n(
+                "1 recording is still transcribing; the window closes when it is done…",
+                "{count} recordings are still transcribing; the window closes when they are done…", len(active),
+            ))
             event.ignore()
         else:
             event.accept()
